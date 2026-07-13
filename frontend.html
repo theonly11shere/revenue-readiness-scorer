@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Revenue Readiness Scorer | Trilloka</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    body { background:#0a0a0a; color:#fff; min-height:100vh; display:flex; flex-direction:column; align-items:center; padding:40px 20px; }
+    .hero { text-align:center; max-width:600px; margin-bottom:40px; }
+    .hero h1 { font-size:32px; font-weight:600; margin-bottom:12px; line-height:1.2; }
+    .hero p { font-size:16px; color:#888; line-height:1.5; }
+    .form-wrap { display:flex; flex-direction:column; gap:10px; max-width:500px; width:100%; margin-bottom:40px; }
+    .form-wrap input { padding:14px 18px; border-radius:10px; border:1px solid #333; background:#111; color:#fff; font-size:15px; outline:none; transition:border-color 0.2s; }
+    .form-wrap input:focus { border-color:#555; }
+    .form-wrap input::placeholder { color:#555; }
+    .form-wrap button { padding:14px 24px; border-radius:10px; background:#fff; color:#000; font-weight:600; border:none; cursor:pointer; font-size:15px; transition:opacity 0.2s; }
+    .form-wrap button:hover { opacity:0.9; }
+    .form-wrap button:disabled { opacity:0.4; cursor:not-allowed; }
+    .email-hint { font-size:12px; color:#666; text-align:center; }
+    .result { display:none; max-width:600px; width:100%; animation:fadeIn 0.4s ease; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+
+    .score-ring-wrap { display:flex; justify-content:center; gap:24px; flex-wrap:wrap; margin-bottom:24px; }
+    .score-ring { width:140px; height:140px; position:relative; }
+    .score-ring svg { width:100%; height:100%; transform:rotate(-90deg); }
+    .score-num { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); font-size:28px; font-weight:600; color:#fff; }
+    .score-label { position:absolute; bottom:-20px; left:50%; transform:translateX(-50%); font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px; white-space:nowrap; }
+
+    .severity-wrap { text-align:center; margin-bottom:30px; }
+    .severity { font-size:14px; font-weight:500; padding:6px 16px; border-radius:6px; display:inline-block; }
+    .severity-critical { background:rgba(220,38,38,0.15); color:#ef4444; }
+    .severity-poor { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .severity-fair { background:rgba(59,130,246,0.15); color:#60a5fa; }
+    .severity-good { background:rgba(22,163,74,0.15); color:#22c55e; }
+    .severity-excellent { background:rgba(16,185,129,0.15); color:#34d399; }
+
+    .verdict { text-align:center; font-size:18px; font-weight:500; margin-bottom:30px; padding:0 20px; line-height:1.4; }
+    .failures { margin-bottom:30px; }
+    .failure-card { background:#111; border:1px solid #222; border-radius:10px; padding:16px; margin-bottom:10px; }
+    .failure-card .rank { font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; }
+    .failure-card .issue { font-size:15px; font-weight:500; margin-bottom:6px; color:#fff; }
+    .failure-card .detail { font-size:13px; color:#888; line-height:1.5; }
+    .failure-card .impact { font-size:13px; color:#aaa; line-height:1.5; margin-top:8px; padding-top:8px; border-top:1px solid #222; }
+
+    .failure-summary { margin-bottom:20px; }
+    .failure-summary h3 { font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px; }
+    .summary-row { display:flex; align-items:center; justify-content:space-between; background:#111; border:1px solid #222; border-radius:8px; padding:10px 14px; margin-bottom:6px; }
+    .summary-row .badge { font-size:11px; font-weight:600; padding:3px 8px; border-radius:4px; text-transform:uppercase; }
+    .badge-critical { background:rgba(220,38,38,0.15); color:#ef4444; }
+    .badge-high { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .badge-medium { background:rgba(59,130,246,0.15); color:#60a5fa; }
+    .badge-low { background:rgba(148,163,184,0.15); color:#94a3b8; }
+    .summary-row .text { font-size:13px; color:#ccc; }
+
+    .evidence-signals { background:#111; border:1px solid #222; border-radius:10px; padding:20px; margin-bottom:20px; }
+    .evidence-signals h3 { font-size:12px; color:#666; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:12px; }
+    .signal-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .signal-status { font-size:11px; font-weight:600; padding:3px 8px; border-radius:4px; text-transform:uppercase; min-width:56px; text-align:center; }
+    .status-pass { background:rgba(22,163,74,0.15); color:#22c55e; }
+    .status-fail { background:rgba(220,38,38,0.15); color:#ef4444; }
+    .status-partial { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .signal-name { font-size:13px; color:#ccc; }
+
+    .future { background:#111; border:1px solid #222; border-radius:10px; padding:20px; margin-bottom:20px; }
+    .future h3 { font-size:12px; color:#666; margin-bottom:12px; text-transform:uppercase; letter-spacing:0.5px; }
+    .future p { font-size:13px; color:#888; line-height:1.6; margin-bottom:10px; }
+    .future p strong { color:#aaa; }
+
+    .cta { text-align:center; padding:30px; background:#111; border:1px solid #222; border-radius:12px; }
+    .cta h3 { font-size:18px; margin-bottom:8px; color:#fff; }
+    .cta p { font-size:14px; color:#888; margin-bottom:16px; line-height:1.5; }
+    .cta a { display:inline-block; padding:12px 28px; background:#fff; color:#000; font-weight:600; border-radius:10px; text-decoration:none; transition:opacity 0.2s; }
+    .cta a:hover { opacity:0.9; }
+    .error { color:#ef4444; text-align:center; margin-top:20px; font-size:14px; }
+    .loading { text-align:center; color:#888; margin-top:20px; font-size:14px; }
+    .hidden { display:none; }
+    .pages-note { text-align:center; font-size:12px; color:#666; margin-bottom:16px; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Is your website costing you customers?</h1>
+    <p>Get your Revenue Readiness Score in 10 seconds. No signup. No BS. Just brutal honesty.</p>
+  </div>
+
+  <div class="form-wrap">
+    <input type="url" id="urlInput" placeholder="https://yourwebsite.com" value="">
+    <input type="email" id="emailInput" placeholder="you@company.com" value="">
+    <button id="scanBtn" onclick="runScan()">Get My Score</button>
+    <div class="email-hint">We need your email to send the full report. No spam.</div>
+  </div>
+
+  <div id="loading" class="loading hidden">Analyzing your website... this takes 10 seconds</div>
+  <div id="result" class="result"></div>
+  <div id="error" class="error hidden"></div>
+
+  <script>
+    // CHANGE THIS TO YOUR API URL
+    const API_URL = 'http://127.0.0.1:8000/api/v1/score/free';
+
+    async function runScan() {
+      const urlInput = document.getElementById('urlInput');
+      const emailInput = document.getElementById('emailInput');
+      const url = urlInput.value.trim();
+      const email = emailInput.value.trim();
+
+      if (!url) {
+        showError('Enter a website URL');
+        return;
+      }
+
+      if (!url.startsWith('http')) {
+        showError('URL must start with https://');
+        return;
+      }
+
+      if (!email || !email.includes('@')) {
+        showError('Enter a valid email address');
+        return;
+      }
+
+      const btn = document.getElementById('scanBtn');
+      const loading = document.getElementById('loading');
+      const result = document.getElementById('result');
+      const error = document.getElementById('error');
+
+      btn.disabled = true;
+      btn.textContent = 'Analyzing...';
+      loading.classList.remove('hidden');
+      result.style.display = 'none';
+      result.innerHTML = '';
+      error.classList.add('hidden');
+      error.textContent = '';
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, email })
+        });
+
+        if (res.status === 429) {
+          showError('Daily limit reached. Come back tomorrow or upgrade to the paid report.');
+          return;
+        }
+
+        if (!res.ok) {
+          showError('Something went wrong. Please try again.');
+          return;
+        }
+
+        const data = await res.json();
+        renderResult(data);
+      } catch (e) {
+        showError('Network error. Check your connection and try again.');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Get My Score';
+        loading.classList.add('hidden');
+      }
+    }
+
+    function showError(msg) {
+      const error = document.getElementById('error');
+      const loading = document.getElementById('loading');
+      const result = document.getElementById('result');
+      error.textContent = msg;
+      error.classList.remove('hidden');
+      loading.classList.add('hidden');
+      result.style.display = 'none';
+    }
+
+    function renderResult(data) {
+      const r = document.getElementById('result');
+      r.style.display = 'block';
+      document.getElementById('error').classList.add('hidden');
+
+      const colors = { critical: '#ef4444', poor: '#f59e0b', fair: '#60a5fa', good: '#22c55e', excellent: '#34d399' };
+      const sevKey = data.severity?.key || 'fair';
+      const color = colors[sevKey] || '#888';
+      const circumference = 2 * Math.PI * 60;
+
+      function ring(score, label, idSuffix) {
+        const offset = circumference * (1 - score / 100);
+        return `
+          <div class="score-ring">
+            <svg viewBox="0 0 140 140">
+              <circle cx="70" cy="70" r="60" fill="none" stroke="#222" stroke-width="8"/>
+              <circle cx="70" cy="70" r="60" fill="none" stroke="${color}" stroke-width="8"
+                stroke-linecap="round" stroke-dasharray="${circumference}"
+                stroke-dashoffset="${circumference}"
+                style="transition:stroke-dashoffset 1.2s cubic-bezier(0.22,1,0.36,1);"
+                id="scoreRing${idSuffix}"/>
+            </svg>
+            <div class="score-num">${score}</div>
+            <div class="score-label">${escapeHtml(label)}</div>
+          </div>`;
+      }
+
+      let scoresHtml = `<div class="score-ring-wrap">`;
+      scoresHtml += ring(data.scores?.readiness_score || 0, 'Readiness', 'R');
+      scoresHtml += ring(data.scores?.evidence_coverage || 0, 'Evidence', 'E');
+      scoresHtml += ring(data.scores?.confidence_score || 0, 'Confidence', 'C');
+      scoresHtml += `</div>`;
+
+      let pagesNote = '';
+      if (data.pages_sampled) {
+        pagesNote = `<div class="pages-note">Based on a sample of ${data.pages_sampled} representative pages.</div>`;
+      }
+
+      let failuresHtml = '';
+      if (data.failure_summary && data.failure_summary.length > 0) {
+        let rows = '';
+        for (const f of data.failure_summary) {
+          const badgeClass = 'badge-' + (f.severity || 'medium');
+          rows += `
+            <div class="summary-row">
+              <span class="badge ${badgeClass}">${escapeHtml(f.severity)}</span>
+              <span class="text">${escapeHtml(f.item)}</span>
+            </div>`;
+        }
+        failuresHtml = `
+          <div class="failure-summary">
+            <h3>Issues Detected</h3>
+            ${rows}
+          </div>`;
+      }
+
+      if (data.failure_2) {
+        failuresHtml += `
+          <div class="failure-card">
+            <div class="rank">2nd Biggest Failure</div>
+            <div class="issue">${escapeHtml(data.failure_2.issue)}</div>
+            <div class="detail">${escapeHtml(data.failure_2.what_we_found)}</div>
+            <div class="impact">${escapeHtml(data.failure_2.why_it_matters)}</div>
+          </div>`;
+      }
+      if (data.failure_3) {
+        failuresHtml += `
+          <div class="failure-card">
+            <div class="rank">3rd Biggest Failure</div>
+            <div class="issue">${escapeHtml(data.failure_3.issue)}</div>
+            <div class="detail">${escapeHtml(data.failure_3.what_we_found)}</div>
+            <div class="impact">${escapeHtml(data.failure_3.why_it_matters)}</div>
+          </div>`;
+      }
+
+      let futureHtml = '';
+      if (data.future_prediction) {
+        futureHtml = `
+          <div class="future">
+            <h3>Future prediction (if nothing changes)</h3>
+            <p><strong>3 months:</strong> ${escapeHtml(data.future_prediction['3_months'])}</p>
+            <p><strong>6 months:</strong> ${escapeHtml(data.future_prediction['6_months'])}</p>
+            <p><strong>12 months:</strong> ${escapeHtml(data.future_prediction['12_months'])}</p>
+          </div>`;
+      }
+
+      let signalsHtml = '';
+      if (data.content_evidence_signals && data.content_evidence_signals.length > 0) {
+        let rows = '';
+        for (const s of data.content_evidence_signals) {
+          const stClass = 'status-' + (s.status || 'partial');
+          rows += `
+            <div class="signal-row">
+              <span class="signal-status ${stClass}">${escapeHtml(s.status)}</span>
+              <span class="signal-name">${escapeHtml(s.name)}</span>
+            </div>`;
+        }
+        signalsHtml = `
+          <div class="evidence-signals">
+            <h3>Content Evidence Signals</h3>
+            ${rows}
+          </div>`;
+      }
+
+      r.innerHTML = `
+        ${scoresHtml}
+        ${pagesNote}
+        <div class="severity-wrap">
+          <span class="severity severity-${sevKey}">${escapeHtml(data.severity?.label || '')}</span>
+        </div>
+        <div class="verdict">"${escapeHtml(data.verdict || '')}"</div>
+        <div class="failures">${failuresHtml}</div>
+        ${signalsHtml}
+        ${futureHtml}
+        <div class="cta">
+          <h3>${escapeHtml(data.upgrade_cta || 'Upgrade for full evidence, root cause, and fix steps.')}</h3>
+          <p>${escapeHtml(data.upgrade_cta?.unlock || 'Want the diagnosis that hurts — but fixes everything?')}</p>
+          <a href="/pricing">Get the Brutal Report — $149</a>
+        </div>
+      `;
+
+      setTimeout(() => {
+        const rR = document.getElementById('scoreRingR');
+        const rE = document.getElementById('scoreRingE');
+        const rC = document.getElementById('scoreRingC');
+        if (rR) rR.style.strokeDashoffset = circumference * (1 - (data.scores?.readiness_score || 0) / 100);
+        if (rE) rE.style.strokeDashoffset = circumference * (1 - (data.scores?.evidence_coverage || 0) / 100);
+        if (rC) rC.style.strokeDashoffset = circumference * (1 - (data.scores?.confidence_score || 0) / 100);
+      }, 100);
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById('urlInput').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') runScan();
+    });
+    document.getElementById('emailInput').addEventListener('keypress', function(e) {
+      if (e.key === 'Enter') runScan();
+    });
+  </script>
+</body>
+</html>

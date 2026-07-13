@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Revenue Readiness Scorer — Paid Report Preview</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background:#0a0a0a;
+      color:#e5e5e5;
+      line-height:1.6;
+      padding:40px 20px;
+    }
+    .container { max-width:800px; margin:0 auto; }
+
+    /* Header */
+    .header { text-align:center; margin-bottom:48px; }
+    .header h1 { font-size:28px; font-weight:600; color:#fff; margin-bottom:8px; }
+    .header .url { font-size:14px; color:#888; font-family:monospace; }
+    .header .timestamp { font-size:12px; color:#555; margin-top:4px; }
+    .badge-paid {
+      display:inline-block;
+      background:rgba(22,163,74,0.15);
+      color:#22c55e;
+      font-size:11px;
+      font-weight:600;
+      padding:4px 12px;
+      border-radius:6px;
+      margin-top:12px;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+    }
+
+    /* Score rings */
+    .scores-section { margin-bottom:48px; }
+    .scores-section h2 {
+      font-size:12px;
+      color:#666;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      margin-bottom:24px;
+    }
+    .score-ring-wrap {
+      display:flex;
+      justify-content:center;
+      gap:32px;
+      flex-wrap:wrap;
+    }
+    .score-ring {
+      width:140px;
+      height:140px;
+      position:relative;
+    }
+    .score-ring svg {
+      width:100%;
+      height:100%;
+      transform:rotate(-90deg);
+    }
+    .score-num {
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      font-size:28px;
+      font-weight:600;
+      color:#fff;
+    }
+    .score-label {
+      position:absolute;
+      bottom:-24px;
+      left:50%;
+      transform:translateX(-50%);
+      font-size:11px;
+      color:#888;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      white-space:nowrap;
+      text-align:center;
+    }
+    .score-explain {
+      position:absolute;
+      bottom:-42px;
+      left:50%;
+      transform:translateX(-50%);
+      font-size:10px;
+      color:#555;
+      white-space:nowrap;
+      text-align:center;
+      width:140px;
+    }
+
+    /* Severity */
+    .severity-wrap { text-align:center; margin-top:48px; margin-bottom:32px; }
+    .severity {
+      font-size:14px;
+      font-weight:500;
+      padding:6px 16px;
+      border-radius:6px;
+      display:inline-block;
+    }
+    .severity-fair { background:rgba(59,130,246,0.15); color:#60a5fa; }
+
+    /* Section cards */
+    .card {
+      background:#111;
+      border:1px solid #222;
+      border-radius:12px;
+      padding:24px;
+      margin-bottom:24px;
+    }
+    .card h2 {
+      font-size:12px;
+      color:#666;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      margin-bottom:16px;
+    }
+    .card h3 {
+      font-size:14px;
+      color:#aaa;
+      margin-bottom:8px;
+      font-weight:500;
+    }
+    .card p, .card li {
+      font-size:13px;
+      color:#888;
+      line-height:1.6;
+    }
+    .card ul { margin-left:20px; margin-top:8px; }
+    .card li { margin-bottom:4px; }
+
+    /* Failure table */
+    .failure-table { width:100%; border-collapse:collapse; margin-top:12px; }
+    .failure-table th {
+      text-align:left;
+      font-size:11px;
+      color:#666;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      padding:8px 12px;
+      border-bottom:1px solid #222;
+    }
+    .failure-table td {
+      padding:10px 12px;
+      font-size:13px;
+      color:#ccc;
+      border-bottom:1px solid #1a1a1a;
+    }
+    .failure-table tr:hover td { background:#161616; }
+    .badge {
+      font-size:10px;
+      font-weight:600;
+      padding:2px 8px;
+      border-radius:4px;
+      text-transform:uppercase;
+    }
+    .badge-critical { background:rgba(220,38,38,0.15); color:#ef4444; }
+    .badge-high { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .badge-medium { background:rgba(59,130,246,0.15); color:#60a5fa; }
+    .badge-low { background:rgba(148,163,184,0.15); color:#94a3b8; }
+
+    /* Evidence signals */
+    .signal-row {
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      padding:10px 0;
+      border-bottom:1px solid #1a1a1a;
+    }
+    .signal-row:last-child { border-bottom:none; }
+    .signal-status {
+      font-size:10px;
+      font-weight:600;
+      padding:2px 8px;
+      border-radius:4px;
+      text-transform:uppercase;
+      min-width:52px;
+      text-align:center;
+      margin-top:2px;
+    }
+    .status-pass { background:rgba(22,163,74,0.15); color:#22c55e; }
+    .status-fail { background:rgba(220,38,38,0.15); color:#ef4444; }
+    .status-partial { background:rgba(245,158,11,0.15); color:#f59e0b; }
+    .signal-body { flex:1; }
+    .signal-name { font-size:13px; color:#ccc; font-weight:500; margin-bottom:2px; }
+    .signal-detail { font-size:12px; color:#666; }
+
+    /* Revenue calculator */
+    .scenario-grid {
+      display:grid;
+      grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));
+      gap:16px;
+      margin-top:12px;
+    }
+    .scenario-card {
+      background:#161616;
+      border:1px solid #222;
+      border-radius:8px;
+      padding:16px;
+    }
+    .scenario-card .scenario-label {
+      font-size:11px;
+      color:#666;
+      text-transform:uppercase;
+      letter-spacing:0.5px;
+      margin-bottom:8px;
+    }
+    .scenario-card .scenario-value {
+      font-size:20px;
+      font-weight:600;
+      color:#fff;
+      margin-bottom:4px;
+    }
+    .scenario-card .scenario-sub {
+      font-size:11px;
+      color:#555;
+    }
+    .scenario-card.conservative { border-color:rgba(59,130,246,0.3); }
+    .scenario-card.expected { border-color:rgba(245,158,11,0.3); }
+    .scenario-card.high { border-color:rgba(220,38,38,0.3); }
+
+    .assumptions-banner {
+      background:rgba(245,158,11,0.08);
+      border:1px solid rgba(245,158,11,0.2);
+      border-radius:8px;
+      padding:12px 16px;
+      margin-bottom:16px;
+      font-size:12px;
+      color:#aaa;
+    }
+    .assumptions-list {
+      font-size:12px;
+      color:#555;
+      margin-top:8px;
+    }
+    .assumptions-list li { margin-bottom:2px; }
+
+    /* Action plan */
+    .action-item {
+      display:flex;
+      align-items:flex-start;
+      gap:12px;
+      padding:12px 0;
+      border-bottom:1px solid #1a1a1a;
+    }
+    .action-item:last-child { border-bottom:none; }
+    .action-priority {
+      width:28px;
+      height:28px;
+      border-radius:50%;
+      background:#222;
+      color:#aaa;
+      font-size:12px;
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      flex-shrink:0;
+    }
+    .action-body { flex:1; }
+    .action-task { font-size:13px; color:#ccc; font-weight:500; }
+    .action-meta { font-size:11px; color:#555; margin-top:2px; }
+    .meta-tag {
+      display:inline-block;
+      font-size:10px;
+      padding:1px 6px;
+      border-radius:3px;
+      margin-right:4px;
+    }
+    .meta-effort { background:#222; color:#888; }
+    .meta-impact { background:rgba(22,163,74,0.1); color:#22c55e; }
+
+    /* Footer */
+    .footer {
+      text-align:center;
+      margin-top:48px;
+      padding-top:24px;
+      border-top:1px solid #222;
+      font-size:12px;
+      color:#444;
+    }
+
+    /* Responsive */
+    @media (max-width:600px) {
+      .score-ring-wrap { gap:20px; }
+      .score-ring { width:110px; height:110px; }
+      .score-num { font-size:22px; }
+      .scenario-grid { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- Header -->
+    <div class="header">
+      <h1>Revenue Readiness Report</h1>
+      <div class="url">https://example-cleaning-service.com</div>
+      <div class="timestamp">Generated: 2026-07-11 16:45 UTC</div>
+      <div class="badge-paid">Paid Report</div>
+    </div>
+
+    <!-- Three Scores -->
+    <div class="scores-section">
+      <h2>Three-Score Assessment</h2>
+      <div class="score-ring-wrap">
+        <div class="score-ring">
+          <svg viewBox="0 0 140 140">
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#222" stroke-width="8"/>
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#60a5fa" stroke-width="8"
+              stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="94"/>
+          </svg>
+          <div class="score-num">75</div>
+          <div class="score-label">Readiness</div>
+          <div class="score-explain">Based on checks that ran</div>
+        </div>
+        <div class="score-ring">
+          <svg viewBox="0 0 140 140">
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#222" stroke-width="8"/>
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#f59e0b" stroke-width="8"
+              stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="151"/>
+          </svg>
+          <div class="score-num">60</div>
+          <div class="score-label">Evidence</div>
+          <div class="score-explain">21 of 35 checks completed</div>
+        </div>
+        <div class="score-ring">
+          <svg viewBox="0 0 140 140">
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#222" stroke-width="8"/>
+            <circle cx="70" cy="70" r="60" fill="none" stroke="#22c55e" stroke-width="8"
+              stroke-linecap="round" stroke-dasharray="377" stroke-dashoffset="38"/>
+          </svg>
+          <div class="score-num">90</div>
+          <div class="score-label">Confidence</div>
+          <div class="score-explain">High-value categories complete</div>
+        </div>
+      </div>
+      <div class="severity-wrap">
+        <span class="severity severity-fair">Fair — Functional but not competitive</span>
+      </div>
+    </div>
+
+    <!-- Page Sample Info -->
+    <div class="card">
+      <h2>Crawl Summary</h2>
+      <p><strong>Pages sampled:</strong> 12 representative pages</p>
+      <p style="margin-top:8px"><strong>Template breakdown:</strong></p>
+      <ul>
+        <li>Home — 1 page</li>
+        <li>Service — 3 pages (Residential Cleaning, Commercial Cleaning, Deep Clean)</li>
+        <li>Location — 2 pages (Calgary, Edmonton)</li>
+        <li>Contact — 2 pages (Contact, Get a Quote)</li>
+        <li>Policy — 2 pages (Privacy Policy, Terms of Service)</li>
+        <li>Blog — 2 pages (Latest Tips, Seasonal Guide)</li>
+      </ul>
+      <p style="margin-top:12px; color:#555; font-size:12px;">
+        Rendering engine: <strong>rendered</strong> (Playwright) — Next.js framework detected.
+      </p>
+    </div>
+
+    <!-- All Checkpoints -->
+    <div class="card">
+      <h2>All 35 Checkpoints</h2>
+      <table class="failure-table">
+        <thead>
+          <tr>
+            <th>Category</th>
+            <th>Checkpoint</th>
+            <th>Severity</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Trust Signals</td>
+            <td>SSL Certificate</td>
+            <td><span class="badge badge-medium">Medium</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Trust Signals</td>
+            <td>Contact Info Visible</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Trust Signals</td>
+            <td>About Page Exists</td>
+            <td><span class="badge badge-medium">Medium</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Trust Signals</td>
+            <td>Team Photos Real</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#ef4444">Fail</td>
+          </tr>
+          <tr>
+            <td>Conversion Ready</td>
+            <td>Clear CTA Above Fold</td>
+            <td><span class="badge badge-critical">Critical</span></td>
+            <td style="color:#ef4444">Fail</td>
+          </tr>
+          <tr>
+            <td>Conversion Ready</td>
+            <td>Mobile Responsive</td>
+            <td><span class="badge badge-critical">Critical</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Conversion Ready</td>
+            <td>Page Load Speed</td>
+            <td><span class="badge badge-critical">Critical</span></td>
+            <td style="color:#f59e0b">Partial</td>
+          </tr>
+          <tr>
+            <td>Conversion Ready</td>
+            <td>Booking/Quote System</td>
+            <td><span class="badge badge-critical">Critical</span></td>
+            <td style="color:#ef4444">Fail</td>
+          </tr>
+          <tr>
+            <td>SEO Foundation</td>
+            <td>Title Tags Optimized</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>SEO Foundation</td>
+            <td>Meta Descriptions</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#f59e0b">Partial</td>
+          </tr>
+          <tr>
+            <td>SEO Foundation</td>
+            <td>Schema Markup</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Content Quality</td>
+            <td>Unique Content</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Content Quality</td>
+            <td>Service Descriptions</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Content Quality</td>
+            <td>Local SEO Content</td>
+            <td><span class="badge badge-medium">Medium</span></td>
+            <td style="color:#f59e0b">Partial</td>
+          </tr>
+          <tr>
+            <td>Technical Health</td>
+            <td>No Broken Links</td>
+            <td><span class="badge badge-high">High</span></td>
+            <td style="color:#ef4444">Fail</td>
+          </tr>
+          <tr>
+            <td>Technical Health</td>
+            <td>Canonical Tags</td>
+            <td><span class="badge badge-medium">Medium</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+          <tr>
+            <td>Technical Health</td>
+            <td>Favicon Present</td>
+            <td><span class="badge badge-low">Low</span></td>
+            <td style="color:#22c55e">Pass</td>
+          </tr>
+        </tbody>
+      </table>
+      <p style="margin-top:12px; font-size:11px; color:#444;">
+        Showing 17 of 35 checkpoints. Full list available in JSON export.
+      </p>
+    </div>
+
+    <!-- Content Evidence Signals -->
+    <div class="card">
+      <h2>Content Evidence Signals</h2>
+      <div class="signal-row">
+        <span class="signal-status status-pass">Pass</span>
+        <div class="signal-body">
+          <div class="signal-name">Author Byline / Authorship Schema</div>
+          <div class="signal-detail">Person schema detected on blog pages; byline visible on 2 of 2 blog posts.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-partial">Partial</span>
+        <div class="signal-body">
+          <div class="signal-name">Original Images (not stock-only)</div>
+          <div class="signal-detail">Mixed: 3 original photos found, but 4 images match stock patterns (shutterstock, istock references in alt text).</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-pass">Pass</span>
+        <div class="signal-body">
+          <div class="signal-name">First-Hand Experience Language</div>
+          <div class="signal-detail">Specific metrics ("99.4% satisfaction rate"), dates ("Since 2018"), and first-hand pronouns ("our team") detected.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-partial">Partial</span>
+        <div class="signal-body">
+          <div class="signal-name">Source Citations / Outbound Authority Links</div>
+          <div class="signal-detail">1 outbound link to .gov health guidance found; no .edu citations. Recommend adding 2-3 more authoritative sources.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-fail">Fail</span>
+        <div class="signal-body">
+          <div class="signal-name">Publication &amp; Last-Modified Dates</div>
+          <div class="signal-detail">No datePublished or dateModified schema found. Blog posts lack visible publish dates. Google may deprioritize fresh-content queries.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-pass">Pass</span>
+        <div class="signal-body">
+          <div class="signal-name">Organization Info / About Page</div>
+          <div class="signal-detail">Organization schema with sameAs social links present. About page linked from nav and footer.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-pass">Pass</span>
+        <div class="signal-body">
+          <div class="signal-name">Templated / Repetitive Passages</div>
+          <div class="signal-detail">No significant repetitive passages detected across 12 sampled pages. Content appears unique per template.</div>
+        </div>
+      </div>
+      <div class="signal-row">
+        <span class="signal-status status-fail">Fail</span>
+        <div class="signal-body">
+          <div class="signal-name">FAQ &amp; Structured Data Accuracy</div>
+          <div class="signal-detail">FAQ section visible on contact page, but no FAQPage schema detected. Adding JSON-LD FAQ markup could win rich snippets.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Revenue Exposure Calculator -->
+    <div class="card">
+      <h2>Illustrative Revenue Exposure — Not Measured Loss</h2>
+
+      <div class="assumptions-banner">
+        <strong>Assumptions used:</strong> Values shown are based on your provided business data.
+        If you did not provide data, conservative industry estimates are used and marked as assumptions.
+      </div>
+
+      <h3>Current Assumptions</h3>
+      <ul class="assumptions-list">
+        <li>Monthly traffic: <strong>2,400 visitors</strong> (user-provided)</li>
+        <li>Conversion rate: <strong>3.2%</strong> (user-provided)</li>
+        <li>Average order value: <strong>$185</strong> (user-provided)</li>
+        <li>Profit margin: <strong>28%</strong> (user-provided)</li>
+        <li>Readiness gap: <strong>25%</strong> (100 - readiness score of 75)</li>
+      </ul>
+
+      <div class="scenario-grid" style="margin-top:24px">
+        <div class="scenario-card conservative">
+          <div class="scenario-label">Conservative</div>
+          <div class="scenario-value">$2,419</div>
+          <div class="scenario-sub">annual exposure (low traffic, low value)</div>
+          <div class="scenario-sub" style="margin-top:8px">1,200 visits/mo @ 1.6% conv, $92 AOV, 14% margin</div>
+        </div>
+        <div class="scenario-card expected">
+          <div class="scenario-label">Expected</div>
+          <div class="scenario-value">$19,353</div>
+          <div class="scenario-sub">annual exposure (your supplied values)</div>
+          <div class="scenario-sub" style="margin-top:8px">2,400 visits/mo @ 3.2% conv, $185 AOV, 28% margin</div>
+        </div>
+        <div class="scenario-card high">
+          <div class="scenario-label">High Exposure</div>
+          <div class="scenario-value">$87,091</div>
+          <div class="scenario-sub">annual exposure (high traffic, high dependency)</div>
+          <div class="scenario-sub" style="margin-top:8px">4,800 visits/mo @ 4.8% conv, $277 AOV, 28% margin</div>
+        </div>
+      </div>
+
+      <p style="margin-top:16px; font-size:12px; color:#555;">
+        <strong>How this is calculated:</strong> Annual exposure = (monthly traffic × conversion rate × AOV × profit margin) × 12 × readiness gap.
+        This is an illustrative projection, not a measured or guaranteed loss. Actual results depend on market conditions, seasonality, and implementation quality.
+      </p>
+    </div>
+
+    <!-- Action Plan -->
+    <div class="card">
+      <h2>Prioritized Action Plan</h2>
+      <div class="action-item">
+        <div class="action-priority">1</div>
+        <div class="action-body">
+          <div class="action-task">Fix: Clear CTA Above Fold</div>
+          <div class="action-meta">
+            <span class="meta-tag meta-effort">High Effort</span>
+            <span class="meta-tag meta-impact">High Impact</span>
+          </div>
+          <div class="action-meta" style="margin-top:6px; color:#666;">
+            Add a prominent booking button above the fold on the homepage and all service pages. Current design buries the CTA in the footer. A/B test "Get a Free Quote" vs "Book Now" copy.
+          </div>
+        </div>
+      </div>
+      <div class="action-item">
+        <div class="action-priority">2</div>
+        <div class="action-body">
+          <div class="action-task">Fix: Booking/Quote System</div>
+          <div class="action-meta">
+            <span class="meta-tag meta-effort">High Effort</span>
+            <span class="meta-tag meta-impact">High Impact</span>
+          </div>
+          <div class="action-meta" style="margin-top:6px; color:#666;">
+            Implement an embedded booking form or integrate Calendly/Setmore. 67% of visitors abandon when forced to call. Self-service booking can increase conversion by 2-3x.
+          </div>
+        </div>
+      </div>
+      <div class="action-item">
+        <div class="action-priority">3</div>
+        <div class="action-body">
+          <div class="action-task">Fix: No Broken Links</div>
+          <div class="action-meta">
+            <span class="meta-tag meta-effort">Medium Effort</span>
+            <span class="meta-tag meta-impact">High Impact</span>
+          </div>
+          <div class="action-meta" style="margin-top:6px; color:#666;">
+            3 broken links detected (404 on /services/deep-clean, /blog/2025-spring-tips, /about/team). Update or redirect. Broken links hurt crawl budget and user trust.
+          </div>
+        </div>
+      </div>
+      <div class="action-item">
+        <div class="action-priority">4</div>
+        <div class="action-body">
+          <div class="action-task">Fix: Team Photos Real</div>
+          <div class="action-meta">
+            <span class="meta-tag meta-effort">Medium Effort</span>
+            <span class="meta-tag meta-impact">Medium Impact</span>
+          </div>
+          <div class="action-meta" style="margin-top:6px; color:#666;">
+            Replace stock team photos with real staff images. Add names and roles. E-E-A-T signals improve when users can verify real people behind the business.
+          </div>
+        </div>
+      </div>
+      <div class="action-item">
+        <div class="action-priority">5</div>
+        <div class="action-body">
+          <div class="action-task">Fix: Publication &amp; Last-Modified Dates</div>
+          <div class="action-meta">
+            <span class="meta-tag meta-effort">Low Effort</span>
+            <span class="meta-tag meta-impact">Medium Impact</span>
+          </div>
+          <div class="action-meta" style="margin-top:6px; color:#666;">
+            Add visible publish dates to blog posts and datePublished/dateModified schema sitewide. Low effort, high SEO upside for freshness-dependent queries.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Future Predictions -->
+    <div class="card">
+      <h2>Future Predictions (If Nothing Changes)</h2>
+      <ul>
+        <li><strong>3 months:</strong> 10% traffic erosion. Competitors with better CTAs and booking systems will outrank you for "cleaning service near me" and related local queries.</li>
+        <li><strong>6 months:</strong> 20% traffic erosion. Google AI Overviews may surface competitor content more frequently because your site lacks FAQ schema and fresh date signals.</li>
+        <li><strong>12 months:</strong> 40% traffic erosion. Without a booking system, paid ad costs will rise as organic share shrinks. Customer acquisition cost could double.</li>
+      </ul>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <p>Revenue Readiness Scorer v2.0 — Paid Report</p>
+      <p style="margin-top:4px;">This report is confidential and intended solely for the owner of the analyzed domain.</p>
+    </div>
+
+  </div>
+</body>
+</html>
