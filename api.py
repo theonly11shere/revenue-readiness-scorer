@@ -1,6 +1,4 @@
-
-# Create api.py
-api_code = '''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 FastAPI layer for the Revenue Readiness Scorer.
 Provides /api/v1/score endpoints, Stripe checkout + webhooks,
@@ -112,7 +110,7 @@ def _log_lead(url: str, email: Optional[str], tier: str, scores: Optional[Dict])
                 "tier": tier,
                 "scores": scores,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-            }) + "\\n")
+            }) + "\n")
     except Exception:
         pass
 
@@ -210,7 +208,7 @@ async def radar_scan(
     brand = domain.replace("www.", "").split(".")[0]
     social = SocialSignalsFetcher(brand=brand, domain=domain).fetch(max_signals=4)
 
-    # Radar Log — synthetic but contextual
+    # Radar Log
     radar_log = [
         f"Just now: {domain} indexed with Copycat Index {copycat['copycat_index']}",
         f"2 min ago: {copycat['template_match']} detected as dominant template signature",
@@ -219,7 +217,7 @@ async def radar_scan(
     if social:
         radar_log.append(f"12 min ago: Social listening found {len(social)} public complaint threads")
 
-    # Persist template match in fingerprints.jsonl for future comparisons
+    # Persist fingerprint
     try:
         fp = {
             "url": url,
@@ -231,7 +229,7 @@ async def radar_scan(
         }
         fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
         with open(fp_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(fp) + "\\n")
+            f.write(json.dumps(fp) + "\n")
     except Exception:
         pass
 
@@ -252,7 +250,7 @@ async def create_checkout(
 ):
     """Create a Stripe Checkout Session for the paid report."""
     try:
-        import stripe  # type: ignore
+        import stripe
         stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
         if not stripe_key:
             raise HTTPException(status_code=500, detail="Stripe secret key not configured.")
@@ -297,10 +295,3 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(..., a
 @app.get("/health")
 async def health():
     return {"status": "ok", "version": "2.0.0"}
-'''
-
-with open("/mnt/agents/output/api.py", "w", encoding="utf-8") as f:
-    f.write(api_code)
-
-print("✅ api.py created")
-print(f"Size: {len(api_code)} characters")
