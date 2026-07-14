@@ -1,34 +1,72 @@
+
+# Create scraper.py with the new feature calls integrated
+scraper_code = '''#!/usr/bin/env python3
 """
-Website scraper — extracts signals across 5 categories from multiple pages.
-Includes TemplateDiscoveryCrawler for multi-page sampling and
-RenderedPageFetcher for optional Playwright-based JS rendering.
-No AI. No LLM. Pure rule-based extraction.
+Website Scraper — fetches pages, extracts signals, and runs Market Doppelgänger checks.
 """
 
+import json
+import os
 import re
-import time
+from collections import Counter
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Tuple
 from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import (
-    MAX_PAGES_FREE,
-    MAX_PAGES_PAID,
-    MIN_PAGES_PER_TEMPLATE_PAID,
-    TEMPLATE_PATTERNS,
-    REQUEST_TIMEOUT,
-    MAX_DOWNLOAD_SIZE,
-    JS_FRAMEWORK_SIGNATURES,
-    PLAYWRIGHT_TIMEOUT,
+from scorer import (
+    TemplateFingerprinter,
+    ContentSamenessChecker,
+    VisualTwinMatcher,
 )
 
+# ── Configuration ───────────────────────
 
-# ── Template Discovery ──────────────────────────────────────────────────────────
+MAX_PAGES_FREE = 3
+MAX_PAGES_PAID = 10
+MIN_PAGES_PER_TEMPLATE_PAID = 2
+REQUEST_TIMEOUT = 15
+MAX_DOWNLOAD_SIZE = 5 * 1024 * 1024
+PLAYWRIGHT_TIMEOUT = 30
+
+TEMPLATE_PATTERNS = {
+    r"/product[s]?/": "product",
+    r"/shop/": "product",
+    r"/store/": "product",
+    r"/service[s]?/": "service",
+    r"/about[-us]?/": "about",
+    r"/contact[-us]?/": "contact",
+    r"/blog/": "blog",
+    r"/news/": "blog",
+    r"/portfolio/": "portfolio",
+    r"/gallery/": "portfolio",
+    r"/testimonial[s]?/": "testimonial",
+    r"/review[s]?/": "testimonial",
+    r"/pricing/": "pricing",
+    r"/faq/": "faq",
+    r"/team/": "team",
+    r"/career[s]?/": "career",
+    r"/privacy/": "policy",
+    r"/terms/": "policy",
+    r"/cookie/": "policy",
+}
+
+JS_FRAMEWORK_SIGNATURES = {
+    "react": "React",
+    "vue": "Vue",
+    "angular": "Angular",
+    "next.js": "Next.js",
+    "nuxt": "Nuxt",
+    "gatsby": "Gatsby",
+    "svelte": "Svelte",
+}
+
+
+# ── Template Discovery Crawler ───────────
+
 class TemplateDiscoveryCrawler:
-    """Clusters discovered URLs by page template type and selects a representative sample."""
-
     def __init__(self, base_url: str, tier: str = "free"):
         self.base_url = base_url if base_url.startswith("http") else f"https://{base_url}"
         self.domain = urlparse(self.base_url).netloc
@@ -41,19 +79,14 @@ class TemplateDiscoveryCrawler:
                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
         }
-        self._discovered: Dict[str, List[str]] = {}   # template_type → [urls]
+        self._discovered: Dict[str, List[str]] = {}
         self._all_links: set = set()
 
     def classify_path(self, url: str, soup: Optional[BeautifulSoup] = None) -> str:
-        """Classify a URL path into a template type using regex patterns + content heuristics."""
         path = urlparse(url).path.lower()
-
-        # 1. Path-pattern matching
         for pattern, ttype in TEMPLATE_PATTERNS.items():
             if re.search(pattern, path, re.I):
                 return ttype
-
-        # 2. Content heuristics (fallback)
         if soup is not None:
             text = soup.get_text(separator=" ", strip=True).lower()
             if any(w in text for w in ("add to cart", "buy now", "price:", "$", "checkout")):
@@ -68,12 +101,9 @@ class TemplateDiscoveryCrawler:
                 return "policy"
             if any(w in text for w in ("find us", "our location", "visit us", "directions")):
                 return "location"
-
-        # Default
         return "other"
 
     def _fetch_html(self, url: str) -> Tuple[str, Optional[BeautifulSoup]]:
-        """Lightweight fetch for link discovery (no Playwright here)."""
         try:
             resp = requests.get(url, headers=self.headers, timeout=REQUEST_TIMEOUT, allow_redirects=True)
             if resp.status_code >= 400:
@@ -86,7 +116,6 @@ class TemplateDiscoveryCrawler:
             return "", None
 
     def discover(self, homepage_soup: BeautifulSoup) -> Dict[str, List[str]]:
-        """Discover internal links from the homepage and cluster by template type."""
         links = homepage_soup.find_all("a", href=True)
         for a in links:
             href = a["href"]
@@ -97,28 +126,19 @@ class TemplateDiscoveryCrawler:
             if full in self._all_links:
                 continue
             self._all_links.add(full)
-
-            # Quick HEAD to verify reachable (optional, skip for speed)
             ttype = self.classify_path(full)
             self._discovered.setdefault(ttype, []).append(full)
-
-        # Always ensure homepage is in 'home'
         if "home" not in self._discovered:
             self._discovered["home"] = [self.base_url]
         elif self.base_url not in self._discovered["home"]:
             self._discovered["home"].insert(0, self.base_url)
-
         return self._discovered
 
     def select_sample(self) -> List[Tuple[str, str]]:
-        """Return a list of (url, template_type) to crawl, respecting tier limits."""
         if not self._discovered:
             return [(self.base_url, "home")]
-
         selected: List[Tuple[str, str]] = []
         counts: Dict[str, int] = {}
-
-        # Round-robin across template types to ensure representation
         types = list(self._discovered.keys())
         round_idx = 0
         while len(selected) < self.max_pages:
@@ -136,20 +156,16 @@ class TemplateDiscoveryCrawler:
             if not added_in_round:
                 break
             round_idx += 1
-
         return selected
 
 
-# ── Playwright Rendering ────────────────────────────────────────────────────────
-class RenderedPageFetcher:
-    """Optional Playwright backend for JS-rendered pages."""
+# ── Rendered Page Fetcher ───────────────
 
+class RenderedPageFetcher:
     def __init__(self):
-        self._playwright = None
-        self._browser = None
         self._available = False
         try:
-            from playwright.sync_api import sync_playwright  # type: ignore
+            from playwright.sync_api import sync_playwright
             self._pw_module = sync_playwright
             self._available = True
         except Exception:
@@ -161,7 +177,6 @@ class RenderedPageFetcher:
         return self._available
 
     def is_js_framework(self, html_text: str) -> Tuple[bool, Optional[str]]:
-        """Detect JS framework signatures in raw HTML."""
         lower = html_text.lower()
         for sig, framework in JS_FRAMEWORK_SIGNATURES.items():
             if sig.lower() in lower:
@@ -169,10 +184,8 @@ class RenderedPageFetcher:
         return False, None
 
     def fetch_with_playwright(self, url: str) -> str:
-        """Fetch fully rendered DOM via Playwright (Chromium headless)."""
         if not self._available or self._pw_module is None:
             raise RuntimeError("Playwright is not installed.")
-
         with self._pw_module() as p:
             browser = p.chromium.launch(headless=True)
             page = browser.new_page()
@@ -184,13 +197,6 @@ class RenderedPageFetcher:
         return html
 
     def fetch(self, url: str, use_playwright: Optional[bool] = None) -> Tuple[str, str, Optional[str]]:
-        """
-        Fetch a page. Returns (html_text, rendering_engine, detected_framework).
-        * use_playwright=None → auto-detect
-        * use_playwright=True → force Playwright
-        * use_playwright=False → force requests/BeautifulSoup
-        """
-        # Fast static path
         if use_playwright is False:
             resp = requests.get(url, headers={
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
@@ -198,7 +204,6 @@ class RenderedPageFetcher:
             resp.raise_for_status()
             return resp.text, "static", None
 
-        # Auto-detect or force Playwright
         resp = requests.get(url, headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }, timeout=REQUEST_TIMEOUT)
@@ -211,12 +216,12 @@ class RenderedPageFetcher:
                 html_rendered = self.fetch_with_playwright(url)
                 return html_rendered, "rendered", framework
             except Exception:
-                # Graceful fallback
                 pass
         return html_static, "static", framework if is_js else None
 
 
-# ── Main Scraper ───────────────────────────────────────────────────────────────
+# ── Main Scraper ─────────────────────────
+
 class WebsiteScraper:
     def __init__(self, url: str, tier: str = "free", use_playwright: Optional[bool] = None):
         self.url = url if url.startswith("http") else f"https://{url}"
@@ -236,7 +241,7 @@ class WebsiteScraper:
 
     def scrape(self) -> Dict[str, Any]:
         try:
-            # Step 1: Fetch homepage (with optional Playwright)
+            # Step 1: Fetch homepage
             fetcher = RenderedPageFetcher()
             html, engine, framework = fetcher.fetch(self.url, self.use_playwright)
             self.rendering_engine = engine
@@ -245,9 +250,25 @@ class WebsiteScraper:
             soup = BeautifulSoup(html, "html.parser")
             self.data["status_code"] = 200
             self.data["html_length"] = len(html)
+            self.data["raw_html"] = html
             self.data["rendering_engine"] = engine
             self.data["detected_framework"] = framework
             self.data["tier"] = self.tier
+            self.data["timestamp"] = datetime.now().isoformat()
+
+            # ── Market Doppelgänger features ──
+            self.data["template_fingerprint"] = TemplateFingerprinter().fingerprint(html)
+            self.data["content_sameness"] = ContentSamenessChecker().check(
+                soup.get_text(separator=" ", strip=True)
+            )
+
+            visual_fp = self._extract_visual_features(html, soup)
+            visual_fp["url"] = self.url
+            visual_fp["timestamp"] = datetime.now().isoformat()
+            twin_matcher = VisualTwinMatcher(visual_fp)
+            self.data["visual_twin"] = twin_matcher.match()
+            twin_matcher.save()
+            # ── End Market Doppelgänger ──
 
             # Step 2: Discover templates and select sample
             crawler = TemplateDiscoveryCrawler(self.url, tier=self.tier)
@@ -257,7 +278,7 @@ class WebsiteScraper:
             self.data["max_pages"] = crawler.max_pages
             self.data["template_breakdown"] = {}
 
-            # Step 3: Crawl each sampled page and extract signals
+            # Step 3: Crawl each sampled page
             for page_url, template_type in sample:
                 page_data = self._scrape_page(page_url, template_type, fetcher)
                 self.pages.append(page_data)
@@ -265,7 +286,7 @@ class WebsiteScraper:
                     self.data["template_breakdown"].get(template_type, 0) + 1
                 )
 
-            # Step 4: Aggregate per-category signals across all pages
+            # Step 4: Aggregate signals
             self._aggregate_signals()
 
         except Exception as e:
@@ -273,12 +294,10 @@ class WebsiteScraper:
         return self.data
 
     def _scrape_page(self, page_url: str, template_type: str, fetcher: RenderedPageFetcher) -> Dict[str, Any]:
-        """Extract all signals from a single page."""
         try:
             html, engine, _ = fetcher.fetch(page_url, self.use_playwright)
             soup = BeautifulSoup(html, "html.parser")
         except Exception:
-            # If a secondary page fails, return minimal data
             return {
                 "url": page_url,
                 "template_type": template_type,
@@ -303,12 +322,8 @@ class WebsiteScraper:
         return page_data
 
     def _aggregate_signals(self) -> None:
-        """Merge per-page signals into the top-level data dict."""
-        # Initialize empty category dicts
         for cat in ("trust", "conversion", "seo", "content", "technical"):
             self.data[cat] = {}
-
-        # Simple aggregation: OR for booleans, MAX for numeric, ANY for text
         for page in self.pages:
             for cat in ("trust", "conversion", "seo", "content", "technical"):
                 src = page.get(cat, {})
@@ -317,17 +332,65 @@ class WebsiteScraper:
                     if key not in dst:
                         dst[key] = value
                     else:
-                        # Boolean: True wins
                         if isinstance(value, bool) and isinstance(dst[key], bool):
                             dst[key] = dst[key] or value
-                        # Numeric: max wins (e.g. speed score, broken count)
                         elif isinstance(value, (int, float)) and isinstance(dst[key], (int, float)):
                             dst[key] = max(dst[key], value)
-                        # String / other: keep first non-empty
                         elif value and not dst[key]:
                             dst[key] = value
 
-    # ── Per-page signal extractors ────────────────────────────────────────────
+    def _extract_visual_features(self, html: str, soup: BeautifulSoup) -> Dict[str, Any]:
+        hex_colors = re.findall(r"#[0-9a-fA-F]{3,6}\\b", html)
+        normalized: List[str] = []
+        for c in hex_colors:
+            c = c.lower()
+            if len(c) == 4:
+                c = "#" + "".join([c[1] * 2, c[2] * 2, c[3] * 2])
+            normalized.append(c)
+        dominant_colors = [c for c, _ in Counter(normalized).most_common(3)]
+
+        font_families: set = set()
+        generic = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "inherit", "initial", "unset", "default"}
+        for match in re.findall(r"font-family\\s*:\\s*([^;]+)", html, re.IGNORECASE):
+            for font in match.split(","):
+                font = font.strip().strip("\\'\\"').lower()
+                if font and font not in generic:
+                    font_families.add(font)
+
+        sections = len(soup.find_all("section"))
+        if sections == 0:
+            sections = len(soup.find_all(["div", "article"], class_=re.compile(r"section|hero|banner", re.I)))
+
+        has_hero = bool(soup.find(class_=re.compile(r"hero|banner", re.I))) or bool(soup.find("section"))
+
+        grid_columns = 0
+        has_grid = False
+        grid_classes = soup.find_all(class_=re.compile(r"grid-cols-(\\d+)", re.I))
+        if grid_classes:
+            has_grid = True
+            for tag in grid_classes:
+                classes = " ".join(tag.get("class", []))
+                nums = re.findall(r"grid-cols-(\\d+)", classes, re.I)
+                if nums:
+                    grid_columns = max(grid_columns, max(int(n) for n in nums))
+
+        grid_css = re.findall(r"grid-template-columns\\s*:\\s*[^;]*repeat\\s*\\(\\s*(\\d+)", html, re.IGNORECASE)
+        if grid_css:
+            has_grid = True
+            grid_columns = max(grid_columns, max(int(n) for n in grid_css))
+
+        return {
+            "dominant_colors": dominant_colors,
+            "font_families": list(font_families)[:5],
+            "layout_ratios": {
+                "hero": 0.4 if has_hero else 0.0,
+                "grid_columns": grid_columns,
+                "sections": sections,
+                "has_hero": has_hero,
+                "has_grid": has_grid,
+            },
+        }
+
     def _extract_trust_signals(self, soup: BeautifulSoup, page_url: str) -> Dict[str, Any]:
         d: Dict[str, Any] = {}
         d["ssl"] = page_url.startswith("https")
@@ -378,8 +441,6 @@ class WebsiteScraper:
         d["canonical"] = bool(soup.find("link", attrs={"rel": "canonical"}))
         d["structured"] = bool(soup.find("script", attrs={"type": "application/ld+json"}))
         d["favicon"] = bool(soup.find("link", rel=re.compile(r"icon|shortcut icon", re.I)))
-
-        # Broken links check (sample first 10 on this page)
         links = soup.find_all("a", href=True)[:10]
         broken = 0
         for link in links:
@@ -392,3 +453,10 @@ class WebsiteScraper:
         d["broken_links"] = broken
         d["broken_pct"] = broken / max(len(links), 1)
         return d
+'''
+
+with open("/mnt/agents/output/scraper.py", "w", encoding="utf-8") as f:
+    f.write(scraper_code)
+
+print("✅ scraper.py created")
+print(f"Size: {len(scraper_code)} characters")

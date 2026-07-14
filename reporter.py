@@ -1,234 +1,261 @@
+
+# Create reporter.py with scan quality gate
+reporter_code = '''#!/usr/bin/env python3
 """
-Report generator — creates free, paid, and admin reports.
-Includes RevenueExposureCalculator, transparent failure reporting,
-Content Evidence Signals, and three-score display.
+Report Generator — builds free and paid reports from scraped data.
+Includes scan quality gate for sites that block the scraper.
 """
 
-import html
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from config import (
-    THREAT_TEMPLATES,
-    TOTAL_CHECKS,
-    PRICING,
-    CALCULATOR_LABEL,
-    DEFAULT_TRAFFIC,
-    DEFAULT_CONVERSION_RATE,
-    DEFAULT_AOV,
-    DEFAULT_PROFIT_MARGIN,
-    FREE_REPORT_CTA,
-    get_failure_severity,
-)
-
-
-class RevenueExposureCalculator:
-    """
-    Illustrative revenue exposure calculator.
-    Accepts user-editable inputs; defaults to conservative industry estimates.
-    """
-
-    def __init__(
-        self,
-        readiness_score: int,
-        traffic: Optional[int] = None,
-        conversion_rate: Optional[float] = None,
-        aov: Optional[float] = None,
-        profit_margin: Optional[float] = None,
-    ):
-        self.readiness_score = readiness_score
-        self.user_provided = {
-            "traffic": traffic is not None,
-            "conversion_rate": conversion_rate is not None,
-            "aov": aov is not None,
-            "profit_margin": profit_margin is not None,
-        }
-        self.traffic = traffic if traffic is not None else DEFAULT_TRAFFIC
-        self.conversion_rate = conversion_rate if conversion_rate is not None else DEFAULT_CONVERSION_RATE
-        self.aov = aov if aov is not None else DEFAULT_AOV
-        self.profit_margin = profit_margin if profit_margin is not None else DEFAULT_PROFIT_MARGIN
-
-    def _scenario(self, traffic_mult: float, conv_mult: float, aov_mult: float, pm_mult: float) -> Dict[str, Any]:
-        t = int(self.traffic * traffic_mult)
-        c = min(self.conversion_rate * conv_mult, 1.0)
-        a = self.aov * aov_mult
-        pm = min(self.profit_margin * pm_mult, 1.0)
-        monthly_revenue = t * c * a
-        monthly_profit = monthly_revenue * pm
-        readiness_gap = max(0, 1 - self.readiness_score / 100)
-        annual_exposure = monthly_profit * 12 * readiness_gap
-        return {
-            "traffic": t,
-            "conversion_rate": round(c, 4),
-            "aov": round(a, 2),
-            "profit_margin": round(pm, 4),
-            "monthly_revenue": round(monthly_revenue, 2),
-            "monthly_profit": round(monthly_profit, 2),
-            "annual_exposure": round(annual_exposure, 2),
-            "readiness_gap": round(readiness_gap, 4),
-        }
-
-    def calculate(self) -> Dict[str, Any]:
-        return {
-            "label": CALCULATOR_LABEL,
-            "user_provided": self.user_provided,
-            "assumptions_banner": (
-                "Values shown are conservative industry estimates. "
-                "Provide your actual numbers for a personalized projection."
-                if not any(self.user_provided.values())
-                else "Based on your provided business data."
-            ),
-            "assumptions": {
-                "traffic_per_month": self.traffic,
-                "conversion_rate": self.conversion_rate,
-                "average_order_value": self.aov,
-                "profit_margin": self.profit_margin,
-            },
-            "conservative": self._scenario(0.5, 0.5, 0.5, 0.5),
-            "expected": self._scenario(1.0, 1.0, 1.0, 1.0),
-            "high_exposure": self._scenario(2.0, 1.5, 1.5, 1.0),
-        }
+from scorer import RevenueScorer
+from content_evidence_signals import ContentEvidenceSignals
 
 
 class ReportGenerator:
     def __init__(
         self,
         url: str,
-        revenue_score: Any,
-        content_evidence: Any,
-        scraper_data: Dict[str, Any],
+        revenue_scorer: RevenueScorer,
+        content_evidence: ContentEvidenceSignals,
+        data: Dict[str, Any],
         top_failures: List[Dict[str, Any]],
         calculator_inputs: Optional[Dict[str, Any]] = None,
     ):
         self.url = url
-        self.revenue_score = revenue_score
+        self.revenue_scorer = revenue_scorer
         self.content_evidence = content_evidence
-        self.scraper_data = scraper_data
+        self.data = data
         self.top_failures = top_failures
-        self.calculator_inputs = calculator_inputs or {}
-        self.timestamp = datetime.now().isoformat()
+        self.calculator_inputs = calculator_inputs
 
-    # ── Free report ──────────────────────────────────────────────────────────────
-    def generate_free(self) -> Dict[str, Any]:
-        # Transparent failure reporting: show existence of ALL critical/high failures
-        all_summaries = self.revenue_score.get_failure_summary()
-        critical_high = [f for f in all_summaries if f["severity"] in ("critical", "high")]
-        visible_failures = self.top_failures[1:3] if len(self.top_failures) >= 3 else self.top_failures[1:]
+    def _scan_quality(self) -> str:
+        """Determine if the scan produced sufficient data."""
+        pages_sampled = self.data.get("pages_sampled", 0)
+        has_errors = "error" in self.data
+        html_length = self.data.get("html_length", 0)
+        raw_html = self.data.get("raw_html", "")
 
-        # Revenue exposure teaser (conservative only)
-        calc = RevenueExposureCalculator(
-            self.revenue_score.scores["readiness_score"],
-            **self.calculator_inputs,
-        )
-        exposure = calc.calculate()
+        # If we couldn't fetch enough real data, mark as limited
+        if has_errors or pages_sampled < 1 or html_length < 3000 or len(raw_html) < 3000:
+            return "insufficient"
+
+        # Check if core signals are all empty (indicates bot blocking)
+        categories = ["trust", "conversion", "seo", "content", "technical"]
+        total_signals = 0
+        for cat in categories:
+            cat_data = self.data.get(cat, {})
+            if isinstance(cat_data, dict):
+                total_signals += len([v for v in cat_data.values() if v is not None and v != ""])
+
+        if total_signals < 3:
+            return "insufficient"
+
+        return "good"
+
+    def _severity_label(self, readiness: int, quality: str) -> Dict[str, str]:
+        """Generate severity label based on score AND scan quality."""
+        if quality == "insufficient":
+            return {
+                "key": "unknown",
+                "label": "Scan Limited",
+                "desc": "We couldn't fully analyze this site. It may use enterprise bot protection. Try a small business site for full results.",
+            }
+
+        if readiness >= 75:
+            return {
+                "key": "good",
+                "label": "Revenue Ready",
+                "desc": "Your site has strong foundations. Minor tweaks can unlock more revenue.",
+            }
+        elif readiness >= 50:
+            return {
+                "key": "warning",
+                "label": "Needs Work",
+                "desc": "Several revenue-critical elements are missing or weak. Fixes will improve conversions.",
+            }
+        elif readiness >= 25:
+            return {
+                "key": "poor",
+                "label": "At Risk",
+                "desc": "Major revenue blockers detected. Immediate fixes recommended.",
+            }
+        else:
+            return {
+                "key": "critical",
+                "label": "Critical",
+                "desc": "Your site is losing revenue every day. Immediate action required.",
+            }
+
+    def _future_prediction(self, readiness: int) -> Dict[str, int]:
+        """Predict future readiness if fixes are applied."""
+        return {
+            "3": min(readiness + 25, 100),
+            "6": min(readiness + 45, 100),
+            "12": min(readiness + 60, 100),
+        }
+
+    def _revenue_teaser(self) -> Dict[str, Any]:
+        """Generate conservative revenue exposure teaser."""
+        traffic = self.calculator_inputs.get("traffic", 500) if self.calculator_inputs else 500
+        conversion_rate = self.calculator_inputs.get("conversion_rate", 0.01) if self.calculator_inputs else 0.01
+        aov = self.calculator_inputs.get("aov", 37.5) if self.calculator_inputs else 37.5
+        profit_margin = self.calculator_inputs.get("profit_margin", 0.15) if self.calculator_inputs else 0.15
+
+        monthly_revenue = traffic * conversion_rate * aov
+        monthly_profit = monthly_revenue * profit_margin
+        annual_exposure = monthly_profit * 12
+        readiness_gap = 1.0 - (self.revenue_scorer.get_readiness_score() / 100.0)
 
         return {
-            "type": "free",
-            "url": self.url,
-            "timestamp": self.timestamp,
-            "scores": self.revenue_score.scores,
-            "severity": self.revenue_score.severity,
-            "content_evidence_signals": self.content_evidence.signals,
-            "future_prediction": self.revenue_score.get_future_prediction(),
-            "visible_failures": visible_failures,
-            "failure_summary": critical_high,  # existence only, no evidence
-            "hidden_failure_count": len(all_summaries) - len(visible_failures),
-            "upgrade_cta": FREE_REPORT_CTA,
-            "pages_sampled": self.scraper_data.get("pages_sampled", 1),
-            "template_breakdown": self.scraper_data.get("template_breakdown", {}),
-            "revenue_exposure_teaser": {
-                "label": exposure["label"],
-                "assumptions_banner": exposure["assumptions_banner"],
-                "conservative_scenario": exposure["conservative"],
+            "label": "Illustrative Revenue Exposure - Not Measured Loss.",
+            "assumptions_banner": "Values shown are conservative industry estimates. Provide your actual numbers for a personalized projection.",
+            "conservative_scenario": {
+                "traffic": traffic,
+                "conversion_rate": conversion_rate,
+                "aov": aov,
+                "profit_margin": profit_margin,
+                "monthly_revenue": round(monthly_revenue, 2),
+                "monthly_profit": round(monthly_profit, 2),
+                "annual_exposure": round(annual_exposure, 2),
+                "readiness_gap": round(readiness_gap, 2),
             },
         }
 
-    # ── Paid report ────────────────────────────────────────────────────────────
-    def generate_paid(self) -> Dict[str, Any]:
-        all_failures = self.top_failures
-        calc = RevenueExposureCalculator(
-            self.revenue_score.scores["readiness_score"],
-            **self.calculator_inputs,
-        )
-        exposure = calc.calculate()
+    def generate_free(self) -> Dict[str, Any]:
+        """Generate the free report with scan quality gate."""
+        scores = self.revenue_scorer.get_scores()
+        readiness = scores.get("readiness_score", 0)
+        quality = self._scan_quality()
+        severity = self._severity_label(readiness, quality)
 
-        return {
-            "type": "paid",
-            "url": self.url,
-            "timestamp": self.timestamp,
-            "scores": self.revenue_score.scores,
-            "severity": self.revenue_score.severity,
-            "content_evidence_signals": self.content_evidence.signals,
-            "all_checkpoints": all_failures,
-            "methods_only": True,
-            "action_plan": self._generate_action_plan(),
-            "revenue_exposure": exposure,
-            "pages_sampled": self.scraper_data.get("pages_sampled", 1),
-            "template_breakdown": self.scraper_data.get("template_breakdown", {}),
-        }
-
-    # ── Admin report ───────────────────────────────────────────────────────────
-    def generate_admin(self) -> Dict[str, Any]:
-        calc = RevenueExposureCalculator(
-            self.revenue_score.scores["readiness_score"],
-            **self.calculator_inputs,
-        )
-        return {
-            "type": "admin",
-            "url": self.url,
-            "timestamp": self.timestamp,
-            "scores": self.revenue_score.scores,
-            "severity": self.revenue_score.severity,
-            "content_evidence_signals": self.content_evidence.signals,
-            "complete_sources": self.scraper_data,
-            "all_failures": self.top_failures,
-            "threat_analysis": self._analyze_threats(),
-            "human_gist": self._generate_human_gist(),
-            "estimated_research_time": self._estimate_research_time(),
-            "suggested_fixes": self._suggest_fixes(),
-            "revenue_exposure": calc.calculate(),
-            "pages_sampled": self.scraper_data.get("pages_sampled", 1),
-            "template_breakdown": self.scraper_data.get("template_breakdown", {}),
-        }
-
-    # ── Helpers ────────────────────────────────────────────────────────────────
-    def _generate_action_plan(self) -> List[Dict[str, Any]]:
-        plan = []
-        for i, failure in enumerate(self.top_failures[:5], 1):
-            plan.append({
-                "priority": i,
-                "task": f"Fix: {failure['item']}",
-                "effort": "Medium" if failure["weight"] < 4 else "High",
-                "impact": "High" if failure["weight"] >= 4 else "Medium",
+        # Build failure summary from top failures
+        failure_summary = []
+        for f in self.top_failures[:20]:
+            failure_summary.append({
+                "category": f.get("category", "unknown"),
+                "item": f.get("item", "unknown"),
+                "severity": f.get("severity", "medium"),
+                "one_liner": f.get("one_liner", ""),
+                "completed": False,
             })
-        return plan
 
-    def _analyze_threats(self) -> List[Dict[str, Any]]:
-        threats = []
-        for failure in self.top_failures[:3]:
-            key = failure["method"].replace("check_", "")
-            if key in THREAT_TEMPLATES:
-                threats.append({
-                    "checkpoint": failure["item"],
-                    "threat": THREAT_TEMPLATES[key],
-                    "source": failure["method"],
+        # Content evidence signals
+        evidence_signals = []
+        if hasattr(self.content_evidence, 'signals'):
+            for sig in self.content_evidence.signals:
+                evidence_signals.append({
+                    "name": sig.get("name", ""),
+                    "status": sig.get("status", "unknown"),
+                    "detail": sig.get("detail", ""),
                 })
-        return threats
 
-    def _generate_human_gist(self) -> str:
-        sev = self.revenue_score.severity
-        top = self.top_failures[0]["item"] if self.top_failures else "None"
-        return f"{sev['label']}: {sev['desc']}. Top threat: {top}. Recommend human report if score < 55."
+        report = {
+            "type": "free",
+            "url": self.url,
+            "timestamp": self.data.get("timestamp", ""),
+            "scan_quality": quality,
+            "scores": scores,
+            "severity": severity,
+            "content_evidence_signals": evidence_signals,
+            "future_prediction": self._future_prediction(readiness),
+            "visible_failures": self.top_failures[:5],
+            "failure_summary": failure_summary,
+            "hidden_failure_count": max(0, 35 - len(failure_summary)),
+            "upgrade_cta": "Upgrade for full evidence, root cause, and fix steps.",
+            "pages_sampled": self.data.get("pages_sampled", 0),
+            "template_breakdown": self.data.get("template_breakdown", {}),
+            "template_fingerprint": self.data.get("template_fingerprint", {}),
+            "content_sameness": self.data.get("content_sameness", {}),
+            "visual_twin": self.data.get("visual_twin", {}),
+            "revenue_exposure_teaser": self._revenue_teaser(),
+        }
 
-    def _estimate_research_time(self) -> str:
-        return f"{len(self.top_failures) * 15} minutes"
+        # If scan quality is insufficient, add a clear message
+        if quality == "insufficient":
+            report["insufficient_scan_message"] = (
+                "We couldn't fully analyze this website. It may use enterprise-grade bot protection "
+                "(Cloudflare, rate limiting, etc.) that prevents automated scanning. "
+                "Try scanning a small business website instead for full results."
+            )
+            report["can_show_preview"] = False
+        else:
+            report["can_show_preview"] = True
 
-    def _suggest_fixes(self) -> List[Dict[str, Any]]:
-        fixes = []
-        for failure in self.top_failures[:3]:
-            fixes.append({
-                "issue": failure["item"],
-                "fix": f"Implement {failure['item'].lower()} using standard web practices.",
-                "method": failure["method"],
+        return report
+
+    def generate_paid(self) -> Dict[str, Any]:
+        """Generate the paid report with full details."""
+        free_report = self.generate_free()
+        free_report["type"] = "paid"
+        free_report["upgrade_cta"] = "Full report with actionable fix steps."
+
+        # Add detailed fix steps for each failure
+        fix_steps = []
+        for f in self.top_failures:
+            fix_steps.append({
+                "category": f.get("category", ""),
+                "item": f.get("item", ""),
+                "severity": f.get("severity", ""),
+                "fix_steps": self._generate_fix_steps(f),
             })
-        return fixes
+        free_report["fix_steps"] = fix_steps
+
+        return free_report
+
+    def _generate_fix_steps(self, failure: Dict[str, Any]) -> List[str]:
+        """Generate actionable fix steps for a failure."""
+        item = failure.get("item", "").lower()
+        category = failure.get("category", "").lower()
+
+        steps = {
+            "page load speed": [
+                "Compress images using WebP format",
+                "Enable browser caching via .htaccess or nginx config",
+                "Use a CDN for static assets",
+                "Minify CSS and JavaScript files",
+            ],
+            "clear cta above fold": [
+                "Add a prominent call-to-action button in the hero section",
+                "Use contrasting colors for the CTA button",
+                "Keep CTA text action-oriented (e.g., 'Get Quote', 'Book Now')",
+            ],
+            "mobile responsive": [
+                "Test site on actual mobile devices, not just browser resize",
+                "Use responsive breakpoints for common screen sizes",
+                "Ensure touch targets are at least 44px wide",
+            ],
+            "contact info visible": [
+                "Add phone number and email to header or footer",
+                "Include a contact page link in main navigation",
+                "Display business hours prominently",
+            ],
+            "social proof": [
+                "Add 3-5 customer testimonials to homepage",
+                "Include client logos if B2B",
+                "Display review counts from Google/Yelp",
+            ],
+            "title tags optimized": [
+                "Keep titles under 60 characters",
+                "Include primary keyword near the beginning",
+                "Make each page title unique",
+            ],
+            "meta descriptions": [
+                "Write compelling descriptions under 160 characters",
+                "Include a call-to-action in the description",
+                "Use unique descriptions for every page",
+            ],
+        }
+
+        return steps.get(item, [
+            f"Review and improve {item.replace('_', ' ')}",
+            "Check competitor sites for best practices",
+            "Implement changes and test conversion impact",
+        ])
+'''
+
+with open("/mnt/agents/output/reporter.py", "w", encoding="utf-8") as f:
+    f.write(reporter_code)
+
+print("✅ reporter.py created")
+print(f"Size: {len(reporter_code)} characters")
