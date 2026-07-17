@@ -1,6 +1,4 @@
-
-# Create scraper.py with the new feature calls integrated
-scraper_code = '''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Website Scraper — fetches pages, extracts signals, and runs Market Doppelgänger checks.
 """
@@ -340,7 +338,7 @@ class WebsiteScraper:
                             dst[key] = value
 
     def _extract_visual_features(self, html: str, soup: BeautifulSoup) -> Dict[str, Any]:
-        hex_colors = re.findall(r"#[0-9a-fA-F]{3,6}\\b", html)
+        hex_colors = re.findall(r"#[0-9a-fA-F]{3,6}\b", html)
         normalized: List[str] = []
         for c in hex_colors:
             c = c.lower()
@@ -351,9 +349,9 @@ class WebsiteScraper:
 
         font_families: set = set()
         generic = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "inherit", "initial", "unset", "default"}
-        for match in re.findall(r"font-family\\s*:\\s*([^;]+)", html, re.IGNORECASE):
+        for match in re.findall(r"font-family\s*:\s*([^;]+)", html, re.IGNORECASE):
             for font in match.split(","):
-                font = font.strip().strip("\\'\\"').lower()
+                font = font.strip().strip("\"'").lower()
                 if font and font not in generic:
                     font_families.add(font)
 
@@ -365,16 +363,16 @@ class WebsiteScraper:
 
         grid_columns = 0
         has_grid = False
-        grid_classes = soup.find_all(class_=re.compile(r"grid-cols-(\\d+)", re.I))
+        grid_classes = soup.find_all(class_=re.compile(r"grid-cols-(\d+)", re.I))
         if grid_classes:
             has_grid = True
             for tag in grid_classes:
                 classes = " ".join(tag.get("class", []))
-                nums = re.findall(r"grid-cols-(\\d+)", classes, re.I)
+                nums = re.findall(r"grid-cols-(\d+)", classes, re.I)
                 if nums:
                     grid_columns = max(grid_columns, max(int(n) for n in nums))
 
-        grid_css = re.findall(r"grid-template-columns\\s*:\\s*[^;]*repeat\\s*\\(\\s*(\\d+)", html, re.IGNORECASE)
+        grid_css = re.findall(r"grid-template-columns\s*:\s*[^;]*repeat\s*\(\s*(\d+)", html, re.IGNORECASE)
         if grid_css:
             has_grid = True
             grid_columns = max(grid_columns, max(int(n) for n in grid_css))
@@ -453,10 +451,3 @@ class WebsiteScraper:
         d["broken_links"] = broken
         d["broken_pct"] = broken / max(len(links), 1)
         return d
-'''
-
-with open("/mnt/agents/output/scraper.py", "w", encoding="utf-8") as f:
-    f.write(scraper_code)
-
-print("✅ scraper.py created")
-print(f"Size: {len(scraper_code)} characters")

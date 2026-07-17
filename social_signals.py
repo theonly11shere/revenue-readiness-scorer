@@ -1,6 +1,4 @@
-
-# Create social_signals.py
-social_signals_code = '''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Social Signals Fetcher — pulls public complaint data from Reddit and Twitter.
 Uses public APIs only. No auth required for Reddit read-only.
@@ -63,7 +61,7 @@ class SocialSignalsFetcher:
                         title = post.get("data", {}).get("title", "")
                         subreddit = post.get("data", {}).get("subreddit", "")
                         if title:
-                            signals.append(f"Reddit r/{subreddit}: \\"{title[:80]}...\\"")
+                            signals.append(f"Reddit r/{subreddit}: \"{title[:80]}...\"")
                             if len(signals) >= limit:
                                 break
             except:
@@ -81,9 +79,3 @@ class SocialSignalsFetcher:
         ]
         import random
         return random.choice(generics)
-'''
-
-with open("/mnt/agents/output/social_signals.py", "w", encoding="utf-8") as f:
-    f.write(social_signals_code)
-
-print("✅ social_signals.py created")
