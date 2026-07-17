@@ -1,6 +1,4 @@
-
-# Create reporter.py with scan quality gate
-reporter_code = '''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Report Generator — builds free and paid reports from scraped data.
 Includes scan quality gate for sites that block the scraper.

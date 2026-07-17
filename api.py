@@ -68,8 +68,7 @@ def _log_lead(url: str, email: Optional[str], tier: str, scores: Optional[Dict])
     try:
         lead_file = os.path.join(os.path.dirname(__file__), "leads.jsonl")
         with open(lead_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps({"url": str(url), "email": email, "tier": tier, "scores": scores, "timestamp": datetime.now(timezone.utc).isoformat()}) + "
-")
+            f.write(json.dumps({"url": str(url), "email": email, "tier": tier, "scores": scores, "timestamp": datetime.now(timezone.utc).isoformat()}) + "\n")
     except Exception:
         pass
 
@@ -136,8 +135,7 @@ async def radar_scan(request: Request, body: ScanRequest):
         fp = {"url": url, "domain": domain, "timestamp": datetime.now(timezone.utc).isoformat(), "copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", [])}
         fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
         with open(fp_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(fp) + "
-")
+            f.write(json.dumps(fp) + "\n")
     except Exception:
         pass
     return JSONResponse(content={"copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", []), "social_signals": social, "radar_log": radar_log})

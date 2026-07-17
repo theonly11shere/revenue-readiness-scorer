@@ -1,6 +1,4 @@
-
-# Create the corrected scorer.py with all Market Doppelgänger features
-scorer_code = '''#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 Revenue Readiness Scorer — Core scoring engine + Market Doppelgänger features.
 """
@@ -320,7 +318,7 @@ class VisualTwinMatcher:
     def save(self) -> None:
         try:
             with open(self.fp_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(self.fingerprint) + "\\n")
+                f.write(json.dumps(self.fingerprint) + "\n")
         except:
             pass
 
@@ -344,7 +342,7 @@ class CopycatIndexScorer:
             }
 
         # Extract CSS classes
-        classes = re.findall(r'class=["\\']([^"\\']+)["\\']', self.html)
+        classes = re.findall(r'class=["\']([^"\']+)["\']', self.html)
         all_classes = []
         for c in classes:
             all_classes.extend(c.split())
@@ -456,4 +454,3 @@ class RevenueScorer:
 
         failures.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
         return failures[:n]
-
