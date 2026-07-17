@@ -456,11 +456,4 @@ class RevenueScorer:
 
         failures.sort(key=lambda x: severity_order.get(x["severity"], 0), reverse=True)
         return failures[:n]
-'''
 
-with open("/mnt/agents/output/scorer.py", "w", encoding="utf-8") as f:
-    f.write(scorer_code)
-
-print("✅ scorer.py created")
-print(f"Size: {len(scorer_code)} characters")
-S

@@ -252,10 +252,3 @@ class ReportGenerator:
             "Check competitor sites for best practices",
             "Implement changes and test conversion impact",
         ])
-'''
-
-with open("/mnt/agents/output/reporter.py", "w", encoding="utf-8") as f:
-    f.write(reporter_code)
-
-print("✅ reporter.py created")
-print(f"Size: {len(reporter_code)} characters")
