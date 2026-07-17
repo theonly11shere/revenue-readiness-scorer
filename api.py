@@ -43,7 +43,7 @@ _rate_limit_cache: Dict[str, Dict[str, Any]] = {}
 def _check_rate_limit(request: Request, tier: str) -> bool:
     client_ip = request.client.host if request.client else "unknown"
     key = f"rate_limit:{client_ip}:{tier}"
-    limit = RATE_LIMIT_FREE if tier == "free" else RATE_LIMIT_PAID
+    limit = int(RATE_LIMIT_FREE if tier == "free" else RATE_LIMIT_PAID)
     if _redis:
         try:
             current = _redis.get(key)
