@@ -22,7 +22,7 @@ TIER_NAMES: List[str] = ["free", "paid", "admin"]
 # ── Delivery & pricing ─────────────────────────────────────────────────────────
 DELIVERY_TIME_FREE: str = "10 seconds"
 DELIVERY_TIME_PAID: str = "24 hours"
-PRICING: Dict[str, int] = {"free": 0, "paid": 149, "retainer": 997}
+PRICING: Dict[str, int] = {"free": 0, "paid": 149, "roadmap": 299, "retainer": 997}
 
 # ── Crawler limits ─────────────────────────────────────────────────────────────
 MAX_PAGES_FREE: int = 8
@@ -55,6 +55,16 @@ REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 # ── Stripe ─────────────────────────────────────────────────────────────────────
 STRIPE_WEBHOOK_SECRET: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+# ── Admin alert email (Gmail SMTP via app password) ────────────────────────────
+SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "465"))
+SMTP_USER: str = os.environ.get("SMTP_USER", "")
+SMTP_PASS: str = os.environ.get("SMTP_PASS", "")
+ALERT_EMAIL: str = os.environ.get("ALERT_EMAIL", "onlyonearpit@gmail.com")
+
+# ── Scan passes (30-day unlimited for paying customers) ───────────────────────
+SCAN_PASS_SECRET: str = os.environ.get("SCAN_PASS_SECRET", "")
+
 
 # ── Template type patterns (regex → type) ───────────────────────────────────────
 TEMPLATE_PATTERNS: Dict[str, str] = {

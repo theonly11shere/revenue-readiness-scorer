@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-import json, os, uuid
+import asyncio, base64, hashlib, hmac, json, os, smtplib, time, uuid
+from email.mime.base import MIMEBase
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email import encoders
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
-from config import TOTAL_CHECKS, PRICING, RATE_LIMIT_FREE, RATE_LIMIT_PAID, REDIS_URL, STRIPE_WEBHOOK_SECRET
+from config import (TOTAL_CHECKS, PRICING, RATE_LIMIT_FREE, RATE_LIMIT_PAID, REDIS_URL, STRIPE_WEBHOOK_SECRET,
+                    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL, SCAN_PASS_SECRET)
 from scraper import WebsiteScraper
 from scorer import RevenueScorer, CopycatIndexScorer
 from content_evidence_signals import ContentEvidenceSignals
@@ -26,6 +31,10 @@ class CheckoutRequest(BaseModel):
     url: HttpUrl
     success_url: str
     cancel_url: str
+    product: Optional[str] = "paid"
+
+class VerifyRequest(BaseModel):
+    session_id: str
 
 app = FastAPI(title="Revenue Readiness Scorer", version="2.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -41,6 +50,8 @@ except Exception:
 _rate_limit_cache: Dict[str, Dict[str, Any]] = {}
 
 def _check_rate_limit(request: Request, tier: str) -> bool:
+    if _verify_scan_pass(request.headers.get("x-scan-pass", "")):
+        return True
     client_ip = request.client.host if request.client else "unknown"
     key = f"rate_limit:{client_ip}:{tier}"
     limit = int(str(RATE_LIMIT_FREE if tier == "free" else RATE_LIMIT_PAID).split("/")[0].strip())
@@ -55,6 +66,11 @@ def _check_rate_limit(request: Request, tier: str) -> bool:
         except:
             pass
     now = datetime.now(timezone.utc).timestamp()
+    if len(_rate_limit_cache) > 10000:
+        for k in [k for k, v in _rate_limit_cache.items() if v["reset"] < now]:
+            del _rate_limit_cache[k]
+        if len(_rate_limit_cache) > 10000:
+            _rate_limit_cache.clear()
     if key not in _rate_limit_cache:
         _rate_limit_cache[key] = {"count": 0, "reset": now + 3600}
     if _rate_limit_cache[key]["reset"] < now:
@@ -72,10 +88,72 @@ def _log_lead(url: str, email: Optional[str], tier: str, scores: Optional[Dict])
     except Exception:
         pass
 
+
+def _scan_pass_secret() -> str:
+    return SCAN_PASS_SECRET or os.environ.get("STRIPE_SECRET_KEY", "") or "rrs-dev-secret"
+
+def _make_scan_pass(email: str, days: int = 30) -> str:
+    exp = int(time.time()) + days * 86400
+    payload = f"{email.strip().lower()}|{exp}"
+    sig = hmac.new(_scan_pass_secret().encode(), payload.encode(), hashlib.sha256).hexdigest()[:32]
+    return base64.urlsafe_b64encode(f"{payload}|{sig}".encode()).decode()
+
+def _verify_scan_pass(token: str) -> bool:
+    if not token:
+        return False
+    try:
+        email, exp, sig = base64.urlsafe_b64decode(token.encode()).decode().rsplit("|", 2)
+        expected = hmac.new(_scan_pass_secret().encode(), f"{email}|{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+        return hmac.compare_digest(sig, expected) and int(exp) > time.time()
+    except Exception:
+        return False
+
+_background_tasks = set()
+
+def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str) -> None:
+    if not (SMTP_USER and SMTP_PASS and ALERT_EMAIL):
+        return
+    try:
+        scores = report.get("scores") or {}
+        sev = report.get("severity") or {}
+        fails = report.get("visible_failures") or []
+        fp = report.get("template_fingerprint") or {}
+        lines = [
+            f"New {tier} scan on the RRS", "",
+            f"URL: {url}",
+            f"Lead email: {lead_email or '(not provided)'}",
+            f"Readiness: {scores.get('readiness_score')}/100 | Evidence: {scores.get('evidence_coverage')} | Confidence: {scores.get('confidence_score')}",
+            f"Severity: {sev.get('label')} - {sev.get('desc')}",
+            f"Template: {fp.get('detected_template')} ({fp.get('generic_score')}% generic)",
+            "", "Top failures:",
+        ]
+        lines += [f"- [{f.get('severity')}] {f.get('one_liner')}" for f in fails[:10]]
+        msg = MIMEMultipart()
+        msg["From"], msg["To"] = SMTP_USER, ALERT_EMAIL
+        msg["Subject"] = f"RRS Lead: {url} -> {scores.get('readiness_score')}/100 ({sev.get('label')})"
+        msg.attach(MIMEText("\n".join(lines), "plain"))
+        part = MIMEBase("application", "json")
+        part.set_payload(json.dumps(report, indent=2))
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="report.json")
+        msg.attach(part)
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_USER, [ALERT_EMAIL], msg.as_string())
+    except Exception as exc:
+        print(f"alert email failed: {exc}")
+
+def _fire_alert(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str) -> None:
+    task = asyncio.create_task(asyncio.to_thread(_send_alert_email, report, url, lead_email, tier))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 @app.post("/api/v1/score/{tier}")
 async def score_site(request: Request, tier: str, body: ScanRequest):
-    if tier not in ("free", "paid"):
-        raise HTTPException(status_code=400, detail="Invalid tier. Use 'free' or 'paid'.")
+    if tier not in ("free", "paid", "roadmap"):
+        raise HTTPException(status_code=400, detail="Invalid tier. Use 'free', 'paid', or 'roadmap'.")
+    if tier in ("paid", "roadmap") and not _verify_scan_pass(request.headers.get("x-scan-pass", "")):
+        raise HTTPException(status_code=401, detail="This report requires a purchase. Your 30-day scan pass is issued right after checkout.")
     if not _check_rate_limit(request, tier):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
     url = str(body.url)
@@ -86,7 +164,7 @@ async def score_site(request: Request, tier: str, body: ScanRequest):
     if body.profit_margin is not None: calc_inputs["profit_margin"] = body.profit_margin
     try:
         scraper = WebsiteScraper(url, tier=tier)
-        data = scraper.scrape()
+        data = await asyncio.to_thread(scraper.scrape)
     except SecurityError as exc:
         raise HTTPException(status_code=400, detail=f"Security policy violation: {exc}")
     except Exception as exc:
@@ -102,7 +180,13 @@ async def score_site(request: Request, tier: str, body: ScanRequest):
     content_evidence.analyze()
     top_failures = revenue_scorer.get_top_failures(TOTAL_CHECKS)
     reporter = ReportGenerator(url, revenue_scorer, content_evidence, data, top_failures, calculator_inputs=calc_inputs if calc_inputs else None)
-    report = reporter.generate_free() if tier == "free" else reporter.generate_paid()
+    if tier == "free":
+        report = reporter.generate_free()
+        _fire_alert(report, url, body.email, tier)
+    elif tier == "roadmap":
+        report = reporter.generate_roadmap()
+    else:
+        report = reporter.generate_paid()
     _log_lead(url, body.email, tier, report.get("scores"))
     return JSONResponse(content=report)
 
@@ -111,7 +195,7 @@ async def radar_scan(request: Request, body: ScanRequest):
     url = str(body.url)
     try:
         scraper = WebsiteScraper(url, tier="free")
-        data = scraper.scrape()
+        data = await asyncio.to_thread(scraper.scrape)
     except SecurityError as exc:
         raise HTTPException(status_code=400, detail=f"Security policy violation: {exc}")
     except Exception as exc:
@@ -148,14 +232,43 @@ async def create_checkout(request: Request, body: CheckoutRequest, idempotency_k
         if not stripe_key:
             raise HTTPException(status_code=500, detail="Stripe secret key not configured.")
         stripe.api_key = stripe_key
+        product = (body.product or "paid")
+        if product not in ("paid", "roadmap"):
+            raise HTTPException(status_code=400, detail="Invalid product. Use 'paid' or 'roadmap'.")
+        product_name = "Revenue Readiness Scorer — Full Report" if product == "paid" else "Revenue Readiness Scorer — Full Report + Fix Roadmap"
         key = idempotency_key or str(uuid.uuid4())
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
-            line_items=[{"price_data": {"currency": "usd", "product_data": {"name": "Revenue Readiness Scorer — Full Report"}, "unit_amount": PRICING["paid"] * 100}, "quantity": 1}],
-            mode="payment", success_url=body.success_url, cancel_url=body.cancel_url, metadata={"url": str(body.url)}, idempotency_key=key)
+            line_items=[{"price_data": {"currency": "usd", "product_data": {"name": product_name}, "unit_amount": PRICING[product] * 100}, "quantity": 1}],
+            mode="payment", success_url=body.success_url, cancel_url=body.cancel_url,
+            metadata={"url": str(body.url), "product": product}, idempotency_key=key)
         return {"checkout_url": session.url, "idempotency_key": key}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Stripe checkout failed: {exc}")
+
+@app.post("/api/v1/verify-session")
+async def verify_session(body: VerifyRequest):
+    try:
+        import stripe
+        stripe_key = os.environ.get("STRIPE_SECRET_KEY", "")
+        if not stripe_key:
+            raise HTTPException(status_code=500, detail="Stripe secret key not configured.")
+        stripe.api_key = stripe_key
+        session = stripe.checkout.Session.retrieve(body.session_id)
+        if getattr(session, "payment_status", "") != "paid":
+            raise HTTPException(status_code=402, detail="Payment not completed for this session.")
+        email = None
+        try:
+            email = session.customer_details.email
+        except Exception:
+            email = None
+        meta = dict(session.metadata or {})
+        return {"paid": True, "product": meta.get("product", "paid"), "url": meta.get("url", ""),
+                "scan_pass": _make_scan_pass(email or "customer")}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Session verification failed: {exc}")
 
 @app.post("/webhooks/stripe")
 async def stripe_webhook(request: Request, stripe_signature: str = Header(..., alias="stripe-signature")):

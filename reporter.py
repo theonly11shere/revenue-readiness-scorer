@@ -201,6 +201,34 @@ class ReportGenerator:
 
         return free_report
 
+
+    def generate_roadmap(self) -> Dict[str, Any]:
+        """Paid report + a 4-week prioritized fix roadmap."""
+        report = self.generate_paid()
+        report["type"] = "roadmap"
+        report["upgrade_cta"] = "Full report with week-by-week fix roadmap."
+        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        ordered = sorted(self.top_failures,
+                         key=lambda f: sev_order.get(str(f.get("severity", "low")).lower(), 3))
+        buckets = [
+            ("Week 1", "Stop the bleeding - critical revenue blockers first", ordered[0:6]),
+            ("Week 2", "Build trust and credibility", ordered[6:12]),
+            ("Week 3", "Content and search depth", ordered[12:18]),
+            ("Week 4", "Polish, speed, and measurement", ordered[18:]),
+        ]
+        weeks = []
+        for name, focus, items in buckets:
+            if not items:
+                continue
+            weeks.append({
+                "week": name,
+                "focus": focus,
+                "items": [{"item": f.get("item", ""), "severity": f.get("severity", ""),
+                           "steps": self._generate_fix_steps(f)} for f in items],
+            })
+        report["roadmap"] = weeks
+        return report
+
     def _generate_fix_steps(self, failure: Dict[str, Any]) -> List[str]:
         """Generate actionable fix steps for a failure."""
         item = failure.get("item", "").lower()
