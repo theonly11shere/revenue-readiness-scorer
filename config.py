@@ -61,6 +61,10 @@ SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER: str = os.environ.get("SMTP_USER", "")
 SMTP_PASS: str = os.environ.get("SMTP_PASS", "")
 ALERT_EMAIL: str = os.environ.get("ALERT_EMAIL", "onlyonearpit@gmail.com")
+# Resend HTTPS email API — preferred on Railway Hobby (outbound SMTP ports are blocked there).
+# Free tier: 100 emails/day, 3,000/month. Sign up at resend.com, create an API key.
+RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "")
+EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "RRS Alerts <onboarding@resend.dev>")
 
 # ── Scan passes (30-day unlimited for paying customers) ───────────────────────
 SCAN_PASS_SECRET: str = os.environ.get("SCAN_PASS_SECRET", "")

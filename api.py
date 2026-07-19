@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
 from config import (TOTAL_CHECKS, PRICING, RATE_LIMIT_FREE, RATE_LIMIT_PAID, REDIS_URL, STRIPE_WEBHOOK_SECRET,
-                    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL, SCAN_PASS_SECRET)
+                    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL, SCAN_PASS_SECRET,
+                    RESEND_API_KEY, EMAIL_FROM)
 from scraper import WebsiteScraper
 from scorer import RevenueScorer, CopycatIndexScorer
 from content_evidence_signals import ContentEvidenceSignals
@@ -110,39 +111,79 @@ def _verify_scan_pass(token: str) -> bool:
 
 _background_tasks = set()
 
+def _alert_payload(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str):
+    """Build (subject, text_body) for the admin alert."""
+    scores = report.get("scores") or {}
+    sev = report.get("severity") or {}
+    fails = report.get("visible_failures") or []
+    fp = report.get("template_fingerprint") or {}
+    lines = [
+        f"New {tier} scan on the RRS", "",
+        f"URL: {url}",
+        f"Lead email: {lead_email or '(not provided)'}",
+        f"Readiness: {scores.get('readiness_score')}/100 | Evidence: {scores.get('evidence_coverage')} | Confidence: {scores.get('confidence_score')}",
+        f"Severity: {sev.get('label')} - {sev.get('desc')}",
+        f"Template: {fp.get('detected_template')} ({fp.get('generic_score')}% generic)",
+        "", "Top failures:",
+    ]
+    lines += [f"- [{f.get('severity')}] {f.get('one_liner')}" for f in fails[:10]]
+    subject = f"RRS Lead: {url} -> {scores.get('readiness_score')}/100 ({sev.get('label')})"
+    return subject, "\n".join(lines)
+
+def _send_via_resend(subject: str, text: str, report: Dict[str, Any]) -> None:
+    """HTTPS email via Resend — works on Railway Hobby where SMTP ports are blocked."""
+    import urllib.request
+    payload = {
+        "from": EMAIL_FROM,
+        "to": [ALERT_EMAIL],
+        "subject": subject,
+        "text": text,
+        "attachments": [{
+            "filename": "report.json",
+            "content": base64.b64encode(json.dumps(report, indent=2).encode()).decode(),
+        }],
+    }
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode(),
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        resp.read()
+
+def _send_via_smtp(subject: str, text: str, report: Dict[str, Any]) -> None:
+    """Gmail SMTP fallback — only works where outbound 465/587 is open (not Railway Hobby)."""
+    msg = MIMEMultipart()
+    msg["From"], msg["To"] = SMTP_USER, ALERT_EMAIL
+    msg["Subject"] = subject
+    msg.attach(MIMEText(text, "plain"))
+    part = MIMEBase("application", "json")
+    part.set_payload(json.dumps(report, indent=2))
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", "attachment", filename="report.json")
+    msg.attach(part)
+    with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
+        s.login(SMTP_USER, SMTP_PASS)
+        s.sendmail(SMTP_USER, [ALERT_EMAIL], msg.as_string())
+
 def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str) -> None:
-    if not (SMTP_USER and SMTP_PASS and ALERT_EMAIL):
+    subject, text = _alert_payload(report, url, lead_email, tier)
+    if RESEND_API_KEY:
+        try:
+            _send_via_resend(subject, text, report)
+            print(f"alert email sent via Resend to {ALERT_EMAIL} for {url}")
+        except Exception as exc:
+            print(f"alert email via Resend failed: {exc}")
         return
-    try:
-        scores = report.get("scores") or {}
-        sev = report.get("severity") or {}
-        fails = report.get("visible_failures") or []
-        fp = report.get("template_fingerprint") or {}
-        lines = [
-            f"New {tier} scan on the RRS", "",
-            f"URL: {url}",
-            f"Lead email: {lead_email or '(not provided)'}",
-            f"Readiness: {scores.get('readiness_score')}/100 | Evidence: {scores.get('evidence_coverage')} | Confidence: {scores.get('confidence_score')}",
-            f"Severity: {sev.get('label')} - {sev.get('desc')}",
-            f"Template: {fp.get('detected_template')} ({fp.get('generic_score')}% generic)",
-            "", "Top failures:",
-        ]
-        lines += [f"- [{f.get('severity')}] {f.get('one_liner')}" for f in fails[:10]]
-        msg = MIMEMultipart()
-        msg["From"], msg["To"] = SMTP_USER, ALERT_EMAIL
-        msg["Subject"] = f"RRS Lead: {url} -> {scores.get('readiness_score')}/100 ({sev.get('label')})"
-        msg.attach(MIMEText("\n".join(lines), "plain"))
-        part = MIMEBase("application", "json")
-        part.set_payload(json.dumps(report, indent=2))
-        encoders.encode_base64(part)
-        part.add_header("Content-Disposition", "attachment", filename="report.json")
-        msg.attach(part)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
-            s.login(SMTP_USER, SMTP_PASS)
-            s.sendmail(SMTP_USER, [ALERT_EMAIL], msg.as_string())
-        print(f"alert email sent to {ALERT_EMAIL} for {url}")
-    except Exception as exc:
-        print(f"alert email failed: {exc}")
+    if SMTP_USER and SMTP_PASS and ALERT_EMAIL:
+        try:
+            _send_via_smtp(subject, text, report)
+            print(f"alert email sent via SMTP to {ALERT_EMAIL} for {url}")
+        except Exception as exc:
+            print(f"alert email via SMTP failed: {exc}")
+        return
+    print("alert email skipped: set RESEND_API_KEY (recommended) or SMTP_USER/SMTP_PASS in Railway variables")
 
 def _fire_alert(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str) -> None:
     task = asyncio.create_task(asyncio.to_thread(_send_alert_email, report, url, lead_email, tier))
@@ -285,4 +326,9 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(..., a
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "2.0.0"}
+    # Booleans only — reveals whether variables are SET, never their values.
+    return {"status": "ok", "version": "2.0.0",
+            "integrations": {
+                "email": "resend" if RESEND_API_KEY else ("smtp" if (SMTP_USER and SMTP_PASS) else "none"),
+                "stripe": bool(os.environ.get("STRIPE_SECRET_KEY")),
+            }}
