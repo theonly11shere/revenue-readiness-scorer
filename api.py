@@ -146,7 +146,14 @@ def _send_via_resend(subject: str, text: str, report: Dict[str, Any]) -> None:
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=json.dumps(payload).encode(),
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            # api.resend.com sits behind Cloudflare, which 403s Python-urllib's
+            # default signature (error 1010). Send a browser-like UA.
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Trilloka-RRS/2.0",
+            "Accept": "application/json",
+        },
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
