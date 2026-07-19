@@ -174,7 +174,12 @@ def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str
             _send_via_resend(subject, text, report)
             print(f"alert email sent via Resend to {ALERT_EMAIL} for {url}")
         except Exception as exc:
-            print(f"alert email via Resend failed: {exc}")
+            body = ""
+            try:
+                body = exc.read().decode(errors="replace")[:500]
+            except Exception:
+                pass
+            print(f"alert email via Resend failed: {exc} | response: {body}")
         return
     if SMTP_USER and SMTP_PASS and ALERT_EMAIL:
         try:
