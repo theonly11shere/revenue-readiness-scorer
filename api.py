@@ -140,6 +140,7 @@ def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
             s.login(SMTP_USER, SMTP_PASS)
             s.sendmail(SMTP_USER, [ALERT_EMAIL], msg.as_string())
+        print(f"alert email sent to {ALERT_EMAIL} for {url}")
     except Exception as exc:
         print(f"alert email failed: {exc}")
 
