@@ -69,6 +69,9 @@ EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "RRS Alerts <onboarding@resend.de
 # ── Scan passes (30-day unlimited for paying customers) ───────────────────────
 SCAN_PASS_SECRET: str = os.environ.get("SCAN_PASS_SECRET", "")
 
+# Domains the radar must never roast (self guard-rail). Comma-separated env override.
+OWN_DOMAINS = {d.strip().lower() for d in os.environ.get("OWN_DOMAINS", "trilloka.com,www.trilloka.com").split(",") if d.strip()}
+
 
 # ── Template type patterns (regex → type) ───────────────────────────────────────
 TEMPLATE_PATTERNS: Dict[str, str] = {

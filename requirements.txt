@@ -10,3 +10,5 @@ stripe>=7.0.0
 playwright>=1.40.0
 beautifulsoup4
 beautifulsoup4
+
+fpdf2

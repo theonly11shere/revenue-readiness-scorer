@@ -1,81 +1,103 @@
-#!/usr/bin/env python3
 """
-Social Signals Fetcher — pulls public complaint data from Reddit and Twitter.
-Uses public APIs only. No auth required for Reddit read-only.
-"""
+Social Signals Fetcher — presence meter.
 
-import json
-import re
-from typing import Dict, Any, List, Optional
-from urllib.parse import quote_plus
+Measures REAL public conversation about a brand on Reddit: how many posts
+actually mention the business, and whether any of them are complaints.
+Returns honest counts and verdicts only — never fabricates signals.
+"""
 
 import requests
+from typing import Any, Dict, List
 
 
 class SocialSignalsFetcher:
-    """Fetch public social signals (complaints, mentions) for a brand/domain."""
+    COMPLAINT_KEYWORDS = (
+        "broken", "not working", "doesn't work", "slow", "scam", "ripoff",
+        "terrible", "worst", "avoid", "awful", "useless", "never again",
+        "down", "error", "complaint", "bad experience", "unresponsive",
+    )
 
     def __init__(self, brand: str, domain: str):
         self.brand = brand.lower()
         self.domain = domain.lower()
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        })
+        self.session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TrillokaBot/1.0)"})
 
-    def fetch(self, max_signals: int = 4) -> List[str]:
-        signals = []
+    def scan(self, max_signals: int = 4, own: bool = False) -> Dict[str, Any]:
+        """Search for public mentions of the brand/domain and grade presence.
+
+        invisible = zero public mentions found (the common SMB case)
+        quiet     = a handful of mentions
+        discussed = people are actually talking about the business
+        """
         try:
-            reddit_signals = self._fetch_reddit(max_signals // 2)
-            signals.extend(reddit_signals)
-        except:
-            pass
+            posts = self._search_reddit([self.brand, self.domain], per_query=8)
+        except Exception:
+            posts = []
 
-        # If we still need more, add generic industry signals
-        while len(signals) < max_signals:
-            signals.append(self._generic_signal())
-            if len(signals) >= max_signals:
-                break
-
-        return signals[:max_signals]
-
-    def _fetch_reddit(self, limit: int) -> List[str]:
-        """Search Reddit for complaints about the brand/domain."""
-        queries = [
-            f"{self.brand} website broken",
-            f"{self.brand} checkout not working",
-            f"{self.domain} slow loading",
-        ]
-
-        signals = []
-        for query in queries:
-            if len(signals) >= limit:
-                break
-            try:
-                url = f"https://www.reddit.com/search.json?q={quote_plus(query)}&limit=3"
-                resp = self.session.get(url, timeout=10)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    posts = data.get("data", {}).get("children", [])
-                    for post in posts[:2]:
-                        title = post.get("data", {}).get("title", "")
-                        subreddit = post.get("data", {}).get("subreddit", "")
-                        if title:
-                            signals.append(f"Reddit r/{subreddit}: \"{title[:80]}...\"")
-                            if len(signals) >= limit:
-                                break
-            except:
+        mentions: List[str] = []
+        complaints: List[str] = []
+        for post in posts:
+            data = post.get("data", {})
+            title = data.get("title", "") or ""
+            selftext = data.get("selftext", "") or ""
+            subreddit = data.get("subreddit", "") or ""
+            blob = (title + " " + selftext).lower()
+            # Only count posts that actually mention this brand/domain —
+            # keyword-only matches are usually about something else entirely.
+            if not title or (self.brand not in blob and self.domain not in blob):
                 continue
+            entry = f'Reddit r/{subreddit}: "{title[:80]}..."'
+            mentions.append(entry)
+            if any(kw in blob for kw in self.COMPLAINT_KEYWORDS):
+                complaints.append(entry)
 
-        return signals
+        total = len(mentions)
+        positive = [m for m in mentions if m not in complaints]
 
-    def _generic_signal(self) -> str:
-        """Return a contextual generic signal based on brand type."""
-        generics = [
-            f"Social listening: Users mention slow checkout on {self.brand}-like sites",
-            f"Forum data: Mobile navigation issues reported for {self.domain} category",
-            f"Review aggregators: 12% of similar sites have unresponsive contact forms",
-            f"Public datasets: {self.brand} industry sees 23% cart abandonment rate",
-        ]
-        import random
-        return random.choice(generics)
+        # Self guard-rail: never roast our own domain with its own radar.
+        if own:
+            return {
+                "mentions_found": total,
+                "complaints_found": len(complaints),
+                "verdict": "own",
+                "verdict_label": "Home turf — the Architect's own domain",
+                "signals": [],
+                "positive_examples": [],
+                "negative_examples": [],
+            }
+
+        if total == 0:
+            verdict, verdict_label = "invisible", "No public conversation found — invisible online"
+        elif total <= 3:
+            verdict, verdict_label = "quiet", "Barely discussed online"
+        else:
+            verdict, verdict_label = "discussed", "People are talking about this business"
+
+        # Complaints first (highest signal), then plain mentions. All real.
+        signals = (complaints + positive)[:max_signals]
+
+        return {
+            "mentions_found": total,
+            "complaints_found": len(complaints),
+            "verdict": verdict,
+            "verdict_label": verdict_label,
+            "signals": signals,
+            "positive_examples": positive[:3],
+            "negative_examples": complaints[:3],
+        }
+
+    def _search_reddit(self, queries: List[str], per_query: int = 5) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for query in queries:
+            try:
+                response = self.session.get(
+                    "https://www.reddit.com/search.json",
+                    params={"q": query, "limit": per_query, "sort": "new"},
+                    timeout=5,
+                )
+                if response.status_code == 200:
+                    results.extend(response.json().get("data", {}).get("children", []))
+            except Exception:
+                continue
+        return results

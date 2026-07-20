@@ -10,9 +10,10 @@ from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, Field
+from urllib.parse import urlparse
 from config import (TOTAL_CHECKS, PRICING, RATE_LIMIT_FREE, RATE_LIMIT_PAID, REDIS_URL, STRIPE_WEBHOOK_SECRET,
                     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, ALERT_EMAIL, SCAN_PASS_SECRET,
-                    RESEND_API_KEY, EMAIL_FROM)
+                    RESEND_API_KEY, EMAIL_FROM, OWN_DOMAINS)
 from scraper import WebsiteScraper
 from scorer import RevenueScorer, CopycatIndexScorer
 from content_evidence_signals import ContentEvidenceSignals
@@ -38,6 +39,15 @@ class VerifyRequest(BaseModel):
     session_id: str
 
 app = FastAPI(title="Revenue Readiness Scorer", version="2.0.0")
+
+
+def _is_own_domain(url: str) -> bool:
+    """Guard-rail: is this URL one of the Architect's own properties?"""
+    try:
+        host = (urlparse(url).hostname or "").lower()
+    except Exception:
+        return False
+    return any(host == d or host.endswith("." + d) for d in OWN_DOMAINS)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 _redis = None
@@ -130,18 +140,32 @@ def _alert_payload(report: Dict[str, Any], url: str, lead_email: Optional[str], 
     subject = f"RRS Lead: {url} -> {scores.get('readiness_score')}/100 ({sev.get('label')})"
     return subject, "\n".join(lines)
 
-def _send_via_resend(subject: str, text: str, report: Dict[str, Any]) -> None:
+def _report_pdf_bytes(report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str):
+    """Branded PDF of the report. Returns None (and logs) if fpdf2/report_pdf unavailable."""
+    try:
+        from report_pdf import build_report_pdf
+        return build_report_pdf(report, url, lead_email=lead_email, tier=tier)
+    except Exception as exc:
+        print(f"PDF build failed, falling back to JSON attachment: {exc}")
+        return None
+
+def _send_via_resend(subject: str, text: str, report: Dict[str, Any],
+                     url: str = "", lead_email: Optional[str] = None, tier: str = "free") -> None:
     """HTTPS email via Resend — works on Railway Hobby where SMTP ports are blocked."""
     import urllib.request
+    pdf = _report_pdf_bytes(report, url, lead_email, tier)
+    if pdf:
+        attachment = {"filename": "Trilloka-Report.pdf",
+                      "content": base64.b64encode(pdf).decode()}
+    else:
+        attachment = {"filename": "report.json",
+                      "content": base64.b64encode(json.dumps(report, indent=2).encode()).decode()}
     payload = {
         "from": EMAIL_FROM,
         "to": [ALERT_EMAIL],
         "subject": subject,
         "text": text,
-        "attachments": [{
-            "filename": "report.json",
-            "content": base64.b64encode(json.dumps(report, indent=2).encode()).decode(),
-        }],
+        "attachments": [attachment],
     }
     req = urllib.request.Request(
         "https://api.resend.com/emails",
@@ -159,16 +183,24 @@ def _send_via_resend(subject: str, text: str, report: Dict[str, Any]) -> None:
     with urllib.request.urlopen(req, timeout=20) as resp:
         resp.read()
 
-def _send_via_smtp(subject: str, text: str, report: Dict[str, Any]) -> None:
+def _send_via_smtp(subject: str, text: str, report: Dict[str, Any],
+                   url: str = "", lead_email: Optional[str] = None, tier: str = "free") -> None:
     """Gmail SMTP fallback — only works where outbound 465/587 is open (not Railway Hobby)."""
     msg = MIMEMultipart()
     msg["From"], msg["To"] = SMTP_USER, ALERT_EMAIL
     msg["Subject"] = subject
     msg.attach(MIMEText(text, "plain"))
-    part = MIMEBase("application", "json")
-    part.set_payload(json.dumps(report, indent=2))
-    encoders.encode_base64(part)
-    part.add_header("Content-Disposition", "attachment", filename="report.json")
+    pdf = _report_pdf_bytes(report, url, lead_email, tier)
+    if pdf:
+        part = MIMEBase("application", "pdf")
+        part.set_payload(pdf)
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="Trilloka-Report.pdf")
+    else:
+        part = MIMEBase("application", "json")
+        part.set_payload(json.dumps(report, indent=2))
+        encoders.encode_base64(part)
+        part.add_header("Content-Disposition", "attachment", filename="report.json")
     msg.attach(part)
     with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=20) as s:
         s.login(SMTP_USER, SMTP_PASS)
@@ -178,7 +210,7 @@ def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str
     subject, text = _alert_payload(report, url, lead_email, tier)
     if RESEND_API_KEY:
         try:
-            _send_via_resend(subject, text, report)
+            _send_via_resend(subject, text, report, url=url, lead_email=lead_email, tier=tier)
             print(f"alert email sent via Resend to {ALERT_EMAIL} for {url}")
         except Exception as exc:
             body = ""
@@ -190,7 +222,7 @@ def _send_alert_email(report: Dict[str, Any], url: str, lead_email: Optional[str
         return
     if SMTP_USER and SMTP_PASS and ALERT_EMAIL:
         try:
-            _send_via_smtp(subject, text, report)
+            _send_via_smtp(subject, text, report, url=url, lead_email=lead_email, tier=tier)
             print(f"alert email sent via SMTP to {ALERT_EMAIL} for {url}")
         except Exception as exc:
             print(f"alert email via SMTP failed: {exc}")
@@ -236,12 +268,20 @@ async def score_site(request: Request, tier: str, body: ScanRequest):
     reporter = ReportGenerator(url, revenue_scorer, content_evidence, data, top_failures, calculator_inputs=calc_inputs if calc_inputs else None)
     if tier == "free":
         report = reporter.generate_free()
-        _fire_alert(report, url, body.email, tier)
     elif tier == "roadmap":
         report = reporter.generate_roadmap()
     else:
         report = reporter.generate_paid()
+    try:
+        domain = urlparse(url).netloc or url
+        brand = domain.replace("www.", "").split(".")[0]
+        report["social_presence"] = await asyncio.to_thread(
+            SocialSignalsFetcher(brand=brand, domain=domain).scan,
+            4, _is_own_domain(url))
+    except Exception as exc:
+        print(f"social presence scan failed for {url}: {exc}")
     _log_lead(url, body.email, tier, report.get("scores"))
+    _fire_alert(report, url, body.email, tier)
     return JSONResponse(content=report)
 
 @app.post("/api/radar-scan")
@@ -258,17 +298,18 @@ async def radar_scan(request: Request, body: ScanRequest):
         raise HTTPException(status_code=500, detail=data["error"])
     html = data.get("raw_html", "")
     copycat = CopycatIndexScorer(html).score()
-    from urllib.parse import urlparse
     domain = urlparse(url).netloc or url
     brand = domain.replace("www.", "").split(".")[0]
-    social = SocialSignalsFetcher(brand=brand, domain=domain).fetch(max_signals=4)
+    social = SocialSignalsFetcher(brand=brand, domain=domain).scan(max_signals=4, own=_is_own_domain(url))
     radar_log = [
         f"Just now: {domain} indexed with Copycat Index {copycat['copycat_index']}",
         f"2 min ago: {copycat['template_match']} detected as dominant template signature",
         f"7 min ago: {copycat['copycat_index'] // 2} matching class patterns found in public template DB",
     ]
-    if social:
-        radar_log.append(f"12 min ago: Social listening found {len(social)} public complaint threads")
+    if social.get("mentions_found"):
+        radar_log.append(f"12 min ago: Social listening found {social['mentions_found']} public mention threads")
+    else:
+        radar_log.append("12 min ago: Social listening found zero public mentions — brand is invisible online")
     try:
         fp = {"url": url, "domain": domain, "timestamp": datetime.now(timezone.utc).isoformat(), "copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", [])}
         fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
@@ -276,7 +317,7 @@ async def radar_scan(request: Request, body: ScanRequest):
             f.write(json.dumps(fp) + "\n")
     except Exception:
         pass
-    return JSONResponse(content={"copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", []), "social_signals": social, "radar_log": radar_log})
+    return JSONResponse(content={"copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", []), "social": social, "radar_log": radar_log})
 
 @app.post("/api/v1/checkout")
 async def create_checkout(request: Request, body: CheckoutRequest, idempotency_key: Optional[str] = Header(default=None, alias="stripe-idempotency-key")):
