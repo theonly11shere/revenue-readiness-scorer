@@ -281,7 +281,16 @@ async def score_site(request: Request, tier: str, body: ScanRequest):
     except Exception as exc:
         print(f"social presence scan failed for {url}: {exc}")
     _log_lead(url, body.email, tier, report.get("scores"))
-    _fire_alert(report, url, body.email, tier)
+    # The admin alert always carries the COMPLETE analysis — every failure plus
+    # the 4-week roadmap — so the founder can forward a full branded report no
+    # matter which tier was scanned. The customer-facing response stays tier-gated.
+    alert_report = report
+    try:
+        alert_report = reporter.generate_roadmap()
+        alert_report["social_presence"] = report.get("social_presence")
+    except Exception as exc:
+        print(f"full alert report build failed for {url}, sending {tier} version: {exc}")
+    _fire_alert(alert_report, url, body.email, tier)
     return JSONResponse(content=report)
 
 @app.post("/api/radar-scan")
@@ -311,10 +320,11 @@ async def radar_scan(request: Request, body: ScanRequest):
     else:
         radar_log.append("12 min ago: Social listening found zero public mentions — brand is invisible online")
     try:
-        fp = {"url": url, "domain": domain, "timestamp": datetime.now(timezone.utc).isoformat(), "copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", [])}
-        fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
-        with open(fp_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(fp) + "\n")
+        if not _is_own_domain(url):  # home turf never enters the twin database
+            fp = {"url": url, "domain": domain, "timestamp": datetime.now(timezone.utc).isoformat(), "copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", [])}
+            fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
+            with open(fp_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(fp) + "\n")
     except Exception:
         pass
     return JSONResponse(content={"copycat_index": copycat["copycat_index"], "template_match": copycat["template_match"], "matched_classes": copycat.get("matched_classes", []), "social": social, "radar_log": radar_log})

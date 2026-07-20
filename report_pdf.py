@@ -127,7 +127,13 @@ class _ReportPDF:
         pdf = self.pdf
         domain = urlparse(self.url).hostname or self.url
         when = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        tier_label = {"free": "Free Scan", "paid": "Full Report", "roadmap": "Full Report + Fix Roadmap"}.get(self.tier, self.tier)
+        # Label by what's inside, not the scan tier — the founder forwards this.
+        if self.report.get("roadmap"):
+            tier_label = "Full Report + Fix Roadmap"
+        elif self.report.get("fix_steps"):
+            tier_label = "Full Report"
+        else:
+            tier_label = "Free Scan"
 
         pdf.ln(10)
         pdf.set_font("helvetica", "B", 22)
