@@ -69,7 +69,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 class ScanRequest(BaseModel):
     url: str = Field(..., min_length=4, max_length=500, description="Domain or URL to scan")
-    tier: str = Field(default="free", regex="^(free|paid)$")
+    tier: str = Field(default="free", pattern="^(free|paid)$")
     use_playwright: Optional[bool] = None
 
     @validator("url")
@@ -91,7 +91,7 @@ class CalculatorRequest(BaseModel):
 
 
 class PaymentRequest(BaseModel):
-    tier: str = Field(..., regex="^(paid|roadmap|retainer)$")
+    tier: str = Field(..., pattern="^(paid|roadmap|retainer)$")
     domain: str = Field(..., min_length=3, max_length=200)
     success_url: str
     cancel_url: str
