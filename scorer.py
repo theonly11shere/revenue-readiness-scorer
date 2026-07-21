@@ -14,48 +14,15 @@ from urllib.parse import urlparse
 import requests
 from bs4 import BeautifulSoup
 
-# ═══════════════════════════════════════════════════════════
-# CONFIGURATION
-# ═══════════════════════════════════════════════════════════
+from config import (
+    MAX_PAGES_FREE, MAX_PAGES_PAID, MIN_PAGES_PER_TEMPLATE_PAID,
+    REQUEST_TIMEOUT, MAX_DOWNLOAD_SIZE, PLAYWRIGHT_TIMEOUT,
+    TEMPLATE_PATTERNS, JS_FRAMEWORK_SIGNATURES,
+    GENERIC_PHRASES, TEMPLATE_SIGNATURES, COMPLAINT_KEYWORDS,
+    TOTAL_CHECKS, SEVERITY, FUTURE_PREDICTIONS,
+    FAILURE_SEVERITY_BY_WEIGHT,
+)
 
-MAX_PAGES_FREE = 3
-MAX_PAGES_PAID = 10
-MIN_PAGES_PER_TEMPLATE_PAID = 2
-REQUEST_TIMEOUT = 15
-MAX_DOWNLOAD_SIZE = 5 * 1024 * 1024  # 5MB
-PLAYWRIGHT_TIMEOUT = 30
-
-TEMPLATE_PATTERNS = {
-    r"/product[s]?/": "product",
-    r"/shop/": "product",
-    r"/store/": "product",
-    r"/service[s]?/": "service",
-    r"/about[-us]?/": "about",
-    r"/contact[-us]?/": "contact",
-    r"/blog/": "blog",
-    r"/news/": "blog",
-    r"/portfolio/": "portfolio",
-    r"/gallery/": "portfolio",
-    r"/testimonial[s]?/": "testimonial",
-    r"/review[s]?/": "testimonial",
-    r"/pricing/": "pricing",
-    r"/faq/": "faq",
-    r"/team/": "team",
-    r"/career[s]?/": "career",
-    r"/privacy/": "policy",
-    r"/terms/": "policy",
-    r"/cookie/": "policy",
-}
-
-JS_FRAMEWORK_SIGNATURES = {
-    "react": "React",
-    "vue": "Vue",
-    "angular": "Angular",
-    "next.js": "Next.js",
-    "nuxt": "Nuxt",
-    "gatsby": "Gatsby",
-    "svelte": "Svelte",
-}
 
 # ═══════════════════════════════════════════════════════════
 # TEMPLATE FINGERPRINTER
@@ -64,25 +31,6 @@ JS_FRAMEWORK_SIGNATURES = {
 class TemplateFingerprinter:
     """Detect CMS / theme / builder signatures in scraped HTML and CSS."""
 
-    SIGNATURES = [
-        ("WordPress Astra", "wordpress", ["ast-container", "ast-", "astra-"], 1_200_000),
-        ("WordPress Elementor", "wordpress", ["elementor-", "elementor/"], 5_000_000),
-        ("WordPress Divi", "wordpress", ["et_pb_", "divi-"], 800_000),
-        ("WordPress Avada", "wordpress", ["avada-", "fusion-"], 700_000),
-        ("Shopify Dawn", "shopify", ["shopify-section", "shopify-dawn"], 2_000_000),
-        ("Shopify Prestige", "shopify", ["prestige-", "shopify-prestige"], 400_000),
-        ("Wix", "wix", ["wix-", "static.wixstatic.com"], 3_000_000),
-        ("Squarespace", "squarespace", ["squarespace-", "static1.squarespace.com"], 1_500_000),
-        ("Webflow", "webflow", ["w-webflow-badge", "webflow-"], 600_000),
-        ("Bootstrap", "framework", ["bootstrap", "container-fluid", "row", "col-"], 10_000_000),
-        ("Tailwind", "framework", ["tailwind", "bg-", "text-", "flex", "grid-cols-"], 8_000_000),
-        ("AI Builder / Generic", "ai", ["ai-generated", "auto-generated", "template-"], 500_000),
-    ]
-
-    def __init__(self):
-        self.matched = []
-        self.total_weight = 0
-
     def fingerprint(self, html: str) -> Dict[str, Any]:
         if not html or len(html) < 100:
             return self._custom_result()
@@ -90,7 +38,7 @@ class TemplateFingerprinter:
         html_lower = html.lower()
         matched = []
 
-        for name, platform, signatures, popularity in self.SIGNATURES:
+        for name, platform, signatures, popularity in TEMPLATE_SIGNATURES:
             hits = 0
             for sig in signatures:
                 if sig.lower() in html_lower:
@@ -102,15 +50,11 @@ class TemplateFingerprinter:
         if not matched:
             return self._custom_result()
 
-        # Sort by weight (most hits × popularity)
         matched.sort(key=lambda x: x[1], reverse=True)
-
-        # Calculate generic score
         total_weight = sum(m[1] for m in matched)
         popularity_boost = min(total_weight / 10_000_000, 5)
         generic_score = min(50 + int(popularity_boost * 10), 98)
 
-        # Build detected template name
         names = [m[0] for m in matched[:3]]
         platforms = list(set([m[2] for m in matched]))
         detected_template = " + ".join(names) if names else "Generic / Templated"
@@ -144,21 +88,6 @@ class TemplateFingerprinter:
 class ContentSamenessChecker:
     """Detect generic, overused business / AI clichés in page text."""
 
-    GENERIC_PHRASES = [
-        "leverage our", "synergy", "digital landscape", "unlock the power",
-        "innovative solutions", "passionate about", "driven by excellence",
-        "cutting-edge", "next-generation", "holistic approach",
-        "best-in-class", "world-class", "industry-leading",
-        "transform your", "empower your", "elevate your",
-        "seamless experience", "end-to-end", "turnkey solution",
-        "scalable platform", "robust framework", "streamlined process",
-        "customer-centric", "data-driven", "results-oriented",
-        "proven track record", "trusted by", "all-in-one",
-        "ecosystem", "bandwidth", "our story", "mission is to",
-        "committed to delivering", "dedicated to providing",
-        "we pride ourselves", "excellence in everything",
-    ]
-
     def check(self, text: str) -> Dict[str, Any]:
         if not text or len(text) < 50:
             return {"score": 0, "matched_phrases": [], "sites_with_same_voice": 0}
@@ -166,24 +95,21 @@ class ContentSamenessChecker:
         text_lower = text.lower()
         matched = []
 
-        for phrase in self.GENERIC_PHRASES:
+        for phrase in GENERIC_PHRASES:
             if phrase in text_lower:
                 matched.append(phrase)
 
-        # Score: 0-100 based on density of clichés
         word_count = len(text.split())
         if word_count == 0:
             return {"score": 0, "matched_phrases": [], "sites_with_same_voice": 0}
 
-        density = len(matched) / max(len(self.GENERIC_PHRASES), 1)
-        score = min(int(density * 200), 98)  # Cap at 98
-
-        # Estimate sites with same voice (rough heuristic)
+        density = len(matched) / max(len(GENERIC_PHRASES), 1)
+        score = min(int(density * 200), 98)
         sites_with_same_voice = round(score * 37 / 100) * 100
 
         return {
             "score": score,
-            "matched_phrases": matched[:10],  # Show top 10
+            "matched_phrases": matched[:10],
             "sites_with_same_voice": sites_with_same_voice,
         }
 
@@ -234,14 +160,6 @@ class VisualTwinMatcher:
 
     def _similarity(self, dist: float) -> int:
         return max(0, min(100, int(100 - dist * 33)))
-
-    def _color_distance(self, c1: str, c2: str) -> float:
-        try:
-            r1, g1, b1 = self._hex_to_rgb(c1)
-            r2, g2, b2 = self._hex_to_rgb(c2)
-            return ((r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2) ** 0.5 / 441.67
-        except:
-            return 1.0
 
     def _matching_elements(self, fp1: Dict, fp2: Dict) -> List[str]:
         elements = []
@@ -318,7 +236,7 @@ class VisualTwinMatcher:
     def save(self) -> None:
         try:
             with open(self.fp_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(self.fingerprint) + "\n")
+                f.write(json.dumps(self.fingerprint) + "\\n")
         except:
             pass
 
@@ -341,7 +259,6 @@ class CopycatIndexScorer:
                 "matched_classes": [],
             }
 
-        # Extract CSS classes
         classes = re.findall(r'class=["\']([^"\']+)["\']', self.html)
         all_classes = []
         for c in classes:
@@ -349,7 +266,6 @@ class CopycatIndexScorer:
 
         class_counts = Counter(all_classes)
 
-        # Check against known template signatures
         template_signatures = {
             "WordPress Astra": ["ast-container", "ast-row", "ast-col"],
             "WordPress Elementor": ["elementor-section", "elementor-column"],
@@ -376,7 +292,6 @@ class CopycatIndexScorer:
         top_template = matches[0][0]
         total_hits = sum(m[1] for m in matches)
         copycat_index = min(50 + total_hits * 2, 98)
-
         matched_classes = [m[0] for m in matches[:3]]
 
         return {
@@ -387,7 +302,90 @@ class CopycatIndexScorer:
 
 
 # ═══════════════════════════════════════════════════════════
-# REVENUE SCORER (Original)
+# SOCIAL SIGNALS FETCHER
+# ═══════════════════════════════════════════════════════════
+
+class SocialSignalsFetcher:
+    """Measures REAL public conversation about a brand on Reddit."""
+
+    def __init__(self, brand: str, domain: str):
+        self.brand = brand.lower()
+        self.domain = domain.lower()
+        self.session = requests.Session()
+        self.session.headers.update({"User-Agent": "Mozilla/5.0 (compatible; TrillokaBot/1.0)"})
+
+    def scan(self, max_signals: int = 4, own: bool = False) -> Dict[str, Any]:
+        try:
+            posts = self._search_reddit([self.brand, self.domain], per_query=8)
+        except Exception:
+            posts = []
+
+        mentions: List[str] = []
+        complaints: List[str] = []
+        for post in posts:
+            data = post.get("data", {})
+            title = data.get("title", "") or ""
+            selftext = data.get("selftext", "") or ""
+            subreddit = data.get("subreddit", "") or ""
+            blob = (title + " " + selftext).lower()
+            if not title or (self.brand not in blob and self.domain not in blob):
+                continue
+            entry = f'Reddit r/{subreddit}: "{title[:80]}..."'
+            mentions.append(entry)
+            if any(kw in blob for kw in COMPLAINT_KEYWORDS):
+                complaints.append(entry)
+
+        total = len(mentions)
+        positive = [m for m in mentions if m not in complaints]
+
+        if own:
+            return {
+                "mentions_found": total,
+                "complaints_found": len(complaints),
+                "verdict": "own",
+                "verdict_label": "Home turf — the Architect's own domain",
+                "signals": [],
+                "positive_examples": [],
+                "negative_examples": [],
+            }
+
+        if total == 0:
+            verdict, verdict_label = "invisible", "No public conversation found — invisible online"
+        elif total <= 3:
+            verdict, verdict_label = "quiet", "Barely discussed online"
+        else:
+            verdict, verdict_label = "discussed", "People are talking about this business"
+
+        signals = (complaints + positive)[:max_signals]
+
+        return {
+            "mentions_found": total,
+            "complaints_found": len(complaints),
+            "verdict": verdict,
+            "verdict_label": verdict_label,
+            "signals": signals,
+            "positive_examples": positive[:3],
+            "negative_examples": complaints[:3],
+        }
+
+    def _search_reddit(self, queries: List[str], per_query: int = 5) -> List[Dict[str, Any]]:
+        results: List[Dict[str, Any]] = []
+        for query in queries:
+            try:
+                response = self.session.get(
+                    "https://www.reddit.com/search.json",
+                    params={"q": query, "limit": per_query, "sort": "new"},
+                    timeout=5,
+                )
+                if response.status_code == 200:
+                    results.extend(response.json().get("data", {}).get("children", []))
+            except Exception:
+                continue
+        return results
+
+
+# ═══════════════════════════════════════════════════════════
+# REVENUE SCORER (Three-Score System)
 # ═══════════════════════════════════════════════════════════
 
 class RevenueScorer:
@@ -398,33 +396,35 @@ class RevenueScorer:
         self.scores: Dict[str, int] = {}
         self.completed_checks = 0
 
-    def calculate_scores(self) -> None:
+    def calculate_scores(self) -> Dict[str, int]:
         """Calculate readiness, evidence, and confidence scores."""
-        # Count completed checks
         categories = ["trust", "conversion", "seo", "content", "technical"]
         total_checks = 0
         completed = 0
+        high_value_complete = 0
 
         for cat in categories:
             cat_data = self.data.get(cat, {})
             if isinstance(cat_data, dict):
                 total_checks += len(cat_data)
-                completed += sum(1 for v in cat_data.values() if v is True or (isinstance(v, (int, float)) and v > 0))
+                cat_completed = sum(1 for v in cat_data.values() if v is True or (isinstance(v, (int, float)) and v > 0))
+                completed += cat_completed
+                # High-value categories: trust and conversion
+                if cat in ["trust", "conversion"] and cat_completed >= 3:
+                    high_value_complete += 1
 
         self.completed_checks = completed
 
-        # Calculate readiness score
-        max_score = 100
-        if total_checks > 0:
-            readiness = int((completed / total_checks) * 100)
-        else:
-            readiness = 0
+        readiness = int((completed / max(total_checks, 1)) * 100) if total_checks > 0 else 0
+        evidence = int((completed / max(TOTAL_CHECKS, 1)) * 100)
+        confidence = int((high_value_complete / 2) * 100) if high_value_complete > 0 else int((completed / max(TOTAL_CHECKS, 1)) * 50)
 
         self.scores = {
             "readiness_score": min(readiness, 100),
-            "evidence_coverage": min(int((completed / max(1, 35)) * 100), 100),
-            "confidence_score": min(int((completed / max(1, 35)) * 100), 100),
+            "evidence_coverage": min(evidence, 100),
+            "confidence_score": min(confidence, 100),
         }
+        return self.scores
 
     def get_scores(self) -> Dict[str, int]:
         return self.scores

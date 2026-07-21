@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
 Report Generator — builds free and paid reports from scraped data.
-Includes scan quality gate for sites that block the scraper.
 """
 
 from typing import Any, Dict, List, Optional
 
+from config import (
+    TOTAL_CHECKS, SEVERITY, FUTURE_PREDICTIONS,
+    DEFAULT_TRAFFIC, DEFAULT_CONVERSION_RATE, DEFAULT_AOV, DEFAULT_PROFIT_MARGIN,
+    CALCULATOR_LABEL, FREE_REPORT_CTA,
+)
 from scorer import RevenueScorer
 from content_evidence_signals import ContentEvidenceSignals
 
@@ -28,17 +32,14 @@ class ReportGenerator:
         self.calculator_inputs = calculator_inputs
 
     def _scan_quality(self) -> str:
-        """Determine if the scan produced sufficient data."""
         pages_sampled = self.data.get("pages_sampled", 0)
         has_errors = "error" in self.data
         html_length = self.data.get("html_length", 0)
         raw_html = self.data.get("raw_html", "")
 
-        # If we couldn't fetch enough real data, mark as limited
         if has_errors or pages_sampled < 1 or html_length < 3000 or len(raw_html) < 3000:
             return "insufficient"
 
-        # Check if core signals are all empty (indicates bot blocking)
         categories = ["trust", "conversion", "seo", "content", "technical"]
         total_signals = 0
         for cat in categories:
@@ -48,45 +49,25 @@ class ReportGenerator:
 
         if total_signals < 3:
             return "insufficient"
-
         return "good"
 
     def _severity_label(self, readiness: int, quality: str) -> Dict[str, str]:
-        """Generate severity label based on score AND scan quality."""
         if quality == "insufficient":
             return {
                 "key": "unknown",
                 "label": "Scan Limited",
                 "desc": "We couldn't fully analyze this site. It may use enterprise bot protection. Try a small business site for full results.",
             }
-
         if readiness >= 75:
-            return {
-                "key": "good",
-                "label": "Revenue Ready",
-                "desc": "Your site has strong foundations. Minor tweaks can unlock more revenue.",
-            }
+            return {"key": "good", "label": "Revenue Ready", "desc": "Your site has strong foundations. Minor tweaks can unlock more revenue."}
         elif readiness >= 50:
-            return {
-                "key": "warning",
-                "label": "Needs Work",
-                "desc": "Several revenue-critical elements are missing or weak. Fixes will improve conversions.",
-            }
+            return {"key": "warning", "label": "Needs Work", "desc": "Several revenue-critical elements are missing or weak. Fixes will improve conversions."}
         elif readiness >= 25:
-            return {
-                "key": "poor",
-                "label": "At Risk",
-                "desc": "Major revenue blockers detected. Immediate fixes recommended.",
-            }
+            return {"key": "poor", "label": "At Risk", "desc": "Major revenue blockers detected. Immediate fixes recommended."}
         else:
-            return {
-                "key": "critical",
-                "label": "Critical",
-                "desc": "Your site is losing revenue every day. Immediate action required.",
-            }
+            return {"key": "critical", "label": "Critical", "desc": "Your site is losing revenue every day. Immediate action required."}
 
     def _future_prediction(self, readiness: int) -> Dict[str, int]:
-        """Predict future readiness if fixes are applied."""
         return {
             "3": min(readiness + 25, 100),
             "6": min(readiness + 45, 100),
@@ -94,11 +75,10 @@ class ReportGenerator:
         }
 
     def _revenue_teaser(self) -> Dict[str, Any]:
-        """Generate conservative revenue exposure teaser."""
-        traffic = self.calculator_inputs.get("traffic", 500) if self.calculator_inputs else 500
-        conversion_rate = self.calculator_inputs.get("conversion_rate", 0.01) if self.calculator_inputs else 0.01
-        aov = self.calculator_inputs.get("aov", 37.5) if self.calculator_inputs else 37.5
-        profit_margin = self.calculator_inputs.get("profit_margin", 0.15) if self.calculator_inputs else 0.15
+        traffic = self.calculator_inputs.get("traffic", DEFAULT_TRAFFIC) if self.calculator_inputs else DEFAULT_TRAFFIC
+        conversion_rate = self.calculator_inputs.get("conversion_rate", DEFAULT_CONVERSION_RATE) if self.calculator_inputs else DEFAULT_CONVERSION_RATE
+        aov = self.calculator_inputs.get("aov", DEFAULT_AOV) if self.calculator_inputs else DEFAULT_AOV
+        profit_margin = self.calculator_inputs.get("profit_margin", DEFAULT_PROFIT_MARGIN) if self.calculator_inputs else DEFAULT_PROFIT_MARGIN
 
         monthly_revenue = traffic * conversion_rate * aov
         monthly_profit = monthly_revenue * profit_margin
@@ -106,7 +86,7 @@ class ReportGenerator:
         readiness_gap = 1.0 - (self.revenue_scorer.get_readiness_score() / 100.0)
 
         return {
-            "label": "Illustrative Revenue Exposure - Not Measured Loss.",
+            "label": CALCULATOR_LABEL,
             "assumptions_banner": "Values shown are conservative industry estimates. Provide your actual numbers for a personalized projection.",
             "conservative_scenario": {
                 "traffic": traffic,
@@ -121,13 +101,11 @@ class ReportGenerator:
         }
 
     def generate_free(self) -> Dict[str, Any]:
-        """Generate the free report with scan quality gate."""
         scores = self.revenue_scorer.get_scores()
         readiness = scores.get("readiness_score", 0)
         quality = self._scan_quality()
         severity = self._severity_label(readiness, quality)
 
-        # Build failure summary from top failures
         failure_summary = []
         for f in self.top_failures[:20]:
             failure_summary.append({
@@ -138,7 +116,6 @@ class ReportGenerator:
                 "completed": False,
             })
 
-        # Content evidence signals
         evidence_signals = []
         if hasattr(self.content_evidence, 'signals'):
             for sig in self.content_evidence.signals:
@@ -159,8 +136,8 @@ class ReportGenerator:
             "future_prediction": self._future_prediction(readiness),
             "visible_failures": self.top_failures[:5],
             "failure_summary": failure_summary,
-            "hidden_failure_count": max(0, 35 - len(failure_summary)),
-            "upgrade_cta": "Upgrade for full evidence, root cause, and fix steps.",
+            "hidden_failure_count": max(0, TOTAL_CHECKS - len(failure_summary)),
+            "upgrade_cta": FREE_REPORT_CTA,
             "pages_sampled": self.data.get("pages_sampled", 0),
             "template_breakdown": self.data.get("template_breakdown", {}),
             "template_fingerprint": self.data.get("template_fingerprint", {}),
@@ -169,11 +146,9 @@ class ReportGenerator:
             "revenue_exposure_teaser": self._revenue_teaser(),
         }
 
-        # If scan quality is insufficient, add a clear message
         if quality == "insufficient":
             report["insufficient_scan_message"] = (
-                "We couldn't fully analyze this website. It may use enterprise-grade bot protection "
-                "(Cloudflare, rate limiting, etc.) that prevents automated scanning. "
+                "We couldn't fully analyze this website. It may use enterprise-grade bot protection. "
                 "Try scanning a small business website instead for full results."
             )
             report["can_show_preview"] = False
@@ -183,12 +158,10 @@ class ReportGenerator:
         return report
 
     def generate_paid(self) -> Dict[str, Any]:
-        """Generate the paid report with full details."""
         free_report = self.generate_free()
         free_report["type"] = "paid"
         free_report["upgrade_cta"] = "Full report with actionable fix steps."
 
-        # Add detailed fix steps for each failure
         fix_steps = []
         for f in self.top_failures:
             fix_steps.append({
@@ -198,18 +171,14 @@ class ReportGenerator:
                 "fix_steps": self._generate_fix_steps(f),
             })
         free_report["fix_steps"] = fix_steps
-
         return free_report
 
-
     def generate_roadmap(self) -> Dict[str, Any]:
-        """Paid report + a 4-week prioritized fix roadmap."""
         report = self.generate_paid()
         report["type"] = "roadmap"
         report["upgrade_cta"] = "Full report with week-by-week fix roadmap."
         sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
-        ordered = sorted(self.top_failures,
-                         key=lambda f: sev_order.get(str(f.get("severity", "low")).lower(), 3))
+        ordered = sorted(self.top_failures, key=lambda f: sev_order.get(str(f.get("severity", "low")).lower(), 3))
         buckets = [
             ("Week 1", "Stop the bleeding - critical revenue blockers first", ordered[0:6]),
             ("Week 2", "Build trust and credibility", ordered[6:12]),
@@ -230,10 +199,7 @@ class ReportGenerator:
         return report
 
     def _generate_fix_steps(self, failure: Dict[str, Any]) -> List[str]:
-        """Generate actionable fix steps for a failure."""
         item = failure.get("item", "").lower()
-        category = failure.get("category", "").lower()
-
         steps = {
             "page load speed": [
                 "Compress images using WebP format",
@@ -272,7 +238,6 @@ class ReportGenerator:
                 "Use unique descriptions for every page",
             ],
         }
-
         return steps.get(item, [
             f"Review and improve {item.replace('_', ' ')}",
             "Check competitor sites for best practices",

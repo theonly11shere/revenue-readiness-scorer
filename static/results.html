@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Revenue Readiness Scanner — Trilloka</title>
+  <meta name="description" content="Run a free 4-point revenue readiness scan on any website.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.min.css">
+  <script src="config.js"></script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Trilloka">
+
+<base target="_blank">
+</head>
+<body>
+
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <nav class="nav" id="nav">
+    <div class="container nav-inner">
+      <a href="/" class="nav-logo-text">TRILLOKA</a>
+      <ul class="nav-links">
+        <li><a href="/">Solutions</a></li>
+        <li><a href="/vlog">Vlog</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+      <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="/">Solutions</a>
+    <a href="/vlog">Vlog</a>
+    <a href="/contact">Contact</a>
+  </div>
+
+  <main id="main">
+
+    <section class="rrs-results">
+      <div class="rrs-header">
+        <span class="tag">Revenue Readiness Results</span>
+        <h2 id="scanDomain">anhandchi.com</h2>
+      </div>
+
+      <div class="rrs-stage" id="rrsStage">
+        <div class="rrs-lines"></div>
+        <div class="rrs-cross" id="rrsCross">
+
+          <div class="rrs-plate state-bad tilt-north depth-far rrs-north" data-metric="template" data-score="89">
+            <div class="rrs-score">89</div>
+            <div class="rrs-label">Template</div>
+            <div class="rrs-sub">89% Generic</div>
+          </div>
+
+          <div class="rrs-plate state-good tilt-west depth-mid rrs-west" data-metric="visual-twin" data-score="0">
+            <div class="rrs-score">0</div>
+            <div class="rrs-label">Visual Twin</div>
+            <div class="rrs-sub">0% Match</div>
+          </div>
+
+          <div class="rrs-hub rrs-center">
+            <div style="width:45px;height:45px;border-radius:50%;background:linear-gradient(135deg,#3c8c9a,#2a6a75);display:flex;align-items:center;justify-content:center;margin-bottom:6px;border:2px solid #a08020;">
+              <span style="color:#F5E6C8;font-size:10px;font-weight:700;letter-spacing:2px;">AN</span>
+            </div>
+            <div class="rrs-hub-domain" id="hubDomain">anhandchi.com</div>
+            <div class="rrs-hub-status">No Public Sentiment</div>
+          </div>
+
+          <div class="rrs-plate state-good tilt-east depth-mid rrs-east" data-metric="sameness" data-score="5">
+            <div class="rrs-score">5</div>
+            <div class="rrs-label">Sameness</div>
+            <div class="rrs-sub">5/100</div>
+          </div>
+
+          <div class="rrs-plate state-bad tilt-south depth-far rrs-south" data-metric="presence" data-score="0">
+            <div class="rrs-score">0</div>
+            <div class="rrs-label">Presence</div>
+            <div class="rrs-sub">No Presence</div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="rrs-footer">
+        <div class="rrs-badge">Revenue Ready</div>
+        <p class="rrs-quote">"Your site has strong foundations. Minor tweaks can unlock more revenue."</p>
+      </div>
+    </section>
+
+    <section class="rrs-scanner">
+      <div class="rrs-box">
+        <h3>Scan Another Domain</h3>
+        <p>Enter any website URL to analyze its revenue readiness</p>
+        <div class="rrs-input">
+          <input type="text" placeholder="https://yourdomain.com" id="scanInput">
+          <button class="btn btn-filled" id="scanAnotherBtn">Scan</button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div><div class="footer-brand">TRILLOKA</div><p class="footer-copy">Revenue Readiness Systems</p></div>
+      <ul class="footer-links">
+        <li><a href="/">Home</a></li>
+        <li><a href="/">Solutions</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <div class="rrs-overlay" id="rrsOverlay"></div>
+
+  <script src="rrs-core.js"></script>
+  <script>
+    (function(){
+      document.getElementById('hamburger').addEventListener('click', function(){
+        document.getElementById('mobileMenu').classList.toggle('open');
+      });
+      var nav = document.getElementById('nav');
+      window.addEventListener('scroll', function(){
+        nav.classList.toggle('nav-scrolled', window.scrollY > 50);
+      });
+
+      var params = new URLSearchParams(window.location.search);
+      var domain = params.get('domain');
+      if (domain) {
+        document.getElementById('scanDomain').textContent = domain;
+        document.getElementById('hubDomain').textContent = domain;
+        var initials = domain.replace(/^https?:\/\//, '').split('.')[0].slice(0,2).toUpperCase();
+        var hubSpan = document.querySelector('.rrs-hub span');
+        if (hubSpan) hubSpan.textContent = initials;
+      }
+
+      document.getElementById('scanAnotherBtn').addEventListener('click', function(){
+        var val = document.getElementById('scanInput').value;
+        if (val) window.location.href = '/results?domain=' + encodeURIComponent(val);
+      });
+
+      var stage = document.getElementById('rrsStage');
+      var cross = document.getElementById('rrsCross');
+      if (stage && cross) {
+        stage.addEventListener('mousemove', function(e){
+          var rect = stage.getBoundingClientRect();
+          var x = (e.clientX - rect.left) / rect.width - 0.5;
+          var y = (e.clientY - rect.top) / rect.height - 0.5;
+          cross.style.transform = 'rotateY(' + (x * 10) + 'deg) rotateX(' + (-y * 10) + 'deg)';
+        });
+        stage.addEventListener('mouseleave', function(){
+          cross.style.transform = 'rotateY(0deg) rotateX(0deg)';
+        });
+      }
+
+      var plates = document.querySelectorAll('.rrs-plate');
+      var overlay = document.getElementById('rrsOverlay');
+
+      // Hover focus — blur other plates
+      plates.forEach(function(plate){
+        plate.addEventListener('mouseenter', function(){
+          if (plate.classList.contains('zoomed')) return;
+          plates.forEach(function(p){
+            if (p === plate) {
+              p.style.filter = 'blur(0px) brightness(1.2)';
+              p.style.zIndex = '100';
+            } else {
+              p.style.filter = 'blur(3px) brightness(0.5)';
+              p.style.opacity = '0.4';
+              p.style.zIndex = '1';
+            }
+          });
+        });
+        plate.addEventListener('mouseleave', function(){
+          plates.forEach(function(p){
+            p.style.filter = '';
+            p.style.opacity = '';
+            p.style.zIndex = '';
+          });
+        });
+      });
+
+      plates.forEach(function(plate){
+        plate.addEventListener('click', function(){
+          if (plate.classList.contains('zoomed')) return;
+          plates.forEach(function(p){
+            p.classList.remove('zoomed');
+            var cb = p.querySelector('.rrs-close');
+            if (cb) cb.remove();
+          });
+          plate.classList.add('zoomed');
+          if (overlay) overlay.classList.add('active');
+          var closeBtn = document.createElement('div');
+          closeBtn.className = 'rrs-close';
+          closeBtn.innerHTML = '&times;';
+          closeBtn.addEventListener('click', function(ev){
+            ev.stopPropagation();
+            plate.classList.remove('zoomed');
+            if (overlay) overlay.classList.remove('active');
+            closeBtn.remove();
+          });
+          plate.appendChild(closeBtn);
+        });
+      });
+
+      if (overlay){
+        overlay.addEventListener('click', function(){
+          plates.forEach(function(p){
+            p.classList.remove('zoomed');
+            var cb = p.querySelector('.rrs-close');
+            if (cb) cb.remove();
+          });
+          overlay.classList.remove('active');
+        });
+      }
+
+      document.addEventListener('keydown', function(e){
+        if (e.key === 'Escape'){
+          plates.forEach(function(p){
+            p.classList.remove('zoomed');
+            var cb = p.querySelector('.rrs-close');
+            if (cb) cb.remove();
+          });
+          if (overlay) overlay.classList.remove('active');
+        }
+      });
+    })();
+  </script>
+
+</body>
+</html>

@@ -14,52 +14,12 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-from scorer import (
-    TemplateFingerprinter,
-    ContentSamenessChecker,
-    VisualTwinMatcher,
+from config import (
+    MAX_PAGES_FREE, MAX_PAGES_PAID, MIN_PAGES_PER_TEMPLATE_PAID,
+    REQUEST_TIMEOUT, MAX_DOWNLOAD_SIZE, PLAYWRIGHT_TIMEOUT,
+    TEMPLATE_PATTERNS, JS_FRAMEWORK_SIGNATURES,
 )
-
-# ── Configuration ───────────────────────
-
-MAX_PAGES_FREE = 3
-MAX_PAGES_PAID = 10
-MIN_PAGES_PER_TEMPLATE_PAID = 2
-REQUEST_TIMEOUT = 15
-MAX_DOWNLOAD_SIZE = 5 * 1024 * 1024
-PLAYWRIGHT_TIMEOUT = 30
-
-TEMPLATE_PATTERNS = {
-    r"/product[s]?/": "product",
-    r"/shop/": "product",
-    r"/store/": "product",
-    r"/service[s]?/": "service",
-    r"/about[-us]?/": "about",
-    r"/contact[-us]?/": "contact",
-    r"/blog/": "blog",
-    r"/news/": "blog",
-    r"/portfolio/": "portfolio",
-    r"/gallery/": "portfolio",
-    r"/testimonial[s]?/": "testimonial",
-    r"/review[s]?/": "testimonial",
-    r"/pricing/": "pricing",
-    r"/faq/": "faq",
-    r"/team/": "team",
-    r"/career[s]?/": "career",
-    r"/privacy/": "policy",
-    r"/terms/": "policy",
-    r"/cookie/": "policy",
-}
-
-JS_FRAMEWORK_SIGNATURES = {
-    "react": "React",
-    "vue": "Vue",
-    "angular": "Angular",
-    "next.js": "Next.js",
-    "nuxt": "Nuxt",
-    "gatsby": "Gatsby",
-    "svelte": "Svelte",
-}
+from scorer import TemplateFingerprinter, ContentSamenessChecker, VisualTwinMatcher
 
 
 # ── Template Discovery Crawler ───────────
@@ -338,7 +298,7 @@ class WebsiteScraper:
                             dst[key] = value
 
     def _extract_visual_features(self, html: str, soup: BeautifulSoup) -> Dict[str, Any]:
-        hex_colors = re.findall(r"#[0-9a-fA-F]{3,6}\b", html)
+        hex_colors = re.findall(r"#[0-9a-fA-F]{3,6}\\b", html)
         normalized: List[str] = []
         for c in hex_colors:
             c = c.lower()
@@ -349,9 +309,9 @@ class WebsiteScraper:
 
         font_families: set = set()
         generic = {"serif", "sans-serif", "monospace", "cursive", "fantasy", "system-ui", "inherit", "initial", "unset", "default"}
-        for match in re.findall(r"font-family\s*:\s*([^;]+)", html, re.IGNORECASE):
+        for match in re.findall(r"font-family\\s*:\\s*([^;]+)", html, re.IGNORECASE):
             for font in match.split(","):
-                font = font.strip().strip("\"'").lower()
+                font = font.strip().strip("\\"'").lower()
                 if font and font not in generic:
                     font_families.add(font)
 
@@ -363,16 +323,16 @@ class WebsiteScraper:
 
         grid_columns = 0
         has_grid = False
-        grid_classes = soup.find_all(class_=re.compile(r"grid-cols-(\d+)", re.I))
+        grid_classes = soup.find_all(class_=re.compile(r"grid-cols-(\\d+)", re.I))
         if grid_classes:
             has_grid = True
             for tag in grid_classes:
                 classes = " ".join(tag.get("class", []))
-                nums = re.findall(r"grid-cols-(\d+)", classes, re.I)
+                nums = re.findall(r"grid-cols-(\\d+)", classes, re.I)
                 if nums:
                     grid_columns = max(grid_columns, max(int(n) for n in nums))
 
-        grid_css = re.findall(r"grid-template-columns\s*:\s*[^;]*repeat\s*\(\s*(\d+)", html, re.IGNORECASE)
+        grid_css = re.findall(r"grid-template-columns\\s*:\\s*[^;]*repeat\\s*\\(\\s*(\\d+)", html, re.IGNORECASE)
         if grid_css:
             has_grid = True
             grid_columns = max(grid_columns, max(int(n) for n in grid_css))

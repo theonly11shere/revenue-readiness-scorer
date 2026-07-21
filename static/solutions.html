@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solutions — Trilloka</title>
+  <meta name="description" content="Six systems designed to turn your digital presence into a revenue engine.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,600;0,700;1,400&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.min.css">
+  <script src="config.js"></script>
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Trilloka">
+
+  <style>
+    .solutions-hero {
+      background: linear-gradient(rgba(10,10,10,0.65), rgba(10,10,10,0.8)), url('images/snow.jpg') center/cover no-repeat;
+      min-height: 50vh;
+      display: flex;
+      align-items: center;
+    }
+  </style>
+<base target="_blank">
+</head>
+<body>
+
+  <a href="#main" class="skip-link">Skip to content</a>
+
+  <nav class="nav" id="nav">
+    <div class="container nav-inner">
+      <a href="index.html" class="nav-logo-text">TRILLOKA</a>
+      <ul class="nav-links">
+        <li><a href="solutions.html" class="active">Solutions</a></li>
+        <li><a href="vlog.html">Vlog</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+      <button class="hamburger" id="hamburger" aria-label="Menu"><span></span><span></span><span></span></button>
+    </div>
+  </nav>
+  <div class="mobile-menu" id="mobileMenu">
+    <a href="solutions.html">Solutions</a>
+    <a href="vlog.html">Vlog</a>
+    <a href="contact.html">Contact</a>
+  </div>
+
+  <main id="main">
+
+    <section class="solutions-hero">
+      <div class="container">
+        <span class="tag">What We Build</span>
+        <h1>Solutions that scale revenue.</h1>
+        <p>Every system is engineered for one outcome: converting visitors into customers. Not vanity metrics. Revenue.</p>
+      </div>
+    </section>
+
+    <section class="solutions-grid container" id="solutionsGrid">
+      <div class="solution-card reveal" data-card="01">
+        <div class="solution-icon">01</div>
+        <h3>Template Liberation</h3>
+        <p>Break free from generic frameworks with custom architecture that no template shop can sell twice.</p>
+      </div>
+      <div class="solution-card reveal" data-card="02">
+        <div class="solution-icon">02</div>
+        <h3>Voice Distillation</h3>
+        <p>Replace clichés with language that only you could write. Your voice is your moat.</p>
+      </div>
+      <div class="solution-card reveal" data-card="03">
+        <div class="solution-icon">03</div>
+        <h3>Visual DNA</h3>
+        <p>Own a layout that no competitor can replicate. Distinctive design is defensible design.</p>
+      </div>
+      <div class="solution-card reveal" data-card="04">
+        <div class="solution-icon">04</div>
+        <h3>Presence Engine</h3>
+        <p>Build social proof and brand signals across the web so prospects find you before they find alternatives.</p>
+      </div>
+      <div class="solution-card reveal" data-card="05">
+        <div class="solution-icon">05</div>
+        <h3>Conversion Loop</h3>
+        <p>Turn every visitor into a measurable revenue event. No leaks. No guesswork.</p>
+      </div>
+      <div class="solution-card reveal" data-card="06">
+        <div class="solution-icon">06</div>
+        <h3>Retention Vault</h3>
+        <p>Keep customers returning with systems, not hope. Loyalty is engineered, not wished for.</p>
+      </div>
+    </section>
+
+    <section class="pricing-note">
+      <div class="container">
+        <span class="tag">Pricing</span>
+        <h2 class="section-title">Built for SMBs, priced for growth.</h2>
+        <p class="section-subtitle">Every solution is scoped to your stage. No enterprise bloat. No freelancer guesswork.</p>
+        <a href="contact.html" class="btn btn-filled" style="margin-top:24px;">Request a Quote</a>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div>
+        <div class="footer-brand">TRILLOKA</div>
+        <p class="footer-copy">Revenue Readiness Systems</p>
+      </div>
+      <ul class="footer-links">
+        <li><a href="index.html">Home</a></li>
+        <li><a href="solutions.html">Solutions</a></li>
+        <li><a href="vlog.html">Vlog</a></li>
+        <li><a href="contact.html">Contact</a></li>
+      </ul>
+    </div>
+  </footer>
+
+  <script>
+    (function(){
+      const hamburger = document.getElementById('hamburger');
+      const mobileMenu = document.getElementById('mobileMenu');
+      hamburger.addEventListener('click', () => mobileMenu.classList.toggle('open'));
+      const nav = document.getElementById('nav');
+      window.addEventListener('scroll', () => nav.classList.toggle('nav-scrolled', window.scrollY > 50));
+      const reveals = document.querySelectorAll('.reveal');
+      const revealObserver = new IntersectionObserver((entries) => {
+        entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('active'); });
+      }, { threshold: 0.1 });
+      reveals.forEach(el => revealObserver.observe(el));
+
+      // Solution card hover focus
+      const grid = document.getElementById('solutionsGrid');
+      if (grid) {
+        const cards = grid.querySelectorAll('.solution-card');
+        cards.forEach(card => {
+          card.addEventListener('mouseenter', () => {
+            cards.forEach(c => {
+              if (c === card) {
+                c.style.transform = 'translateY(-8px) scale(1.03)';
+                c.style.filter = 'brightness(1.15)';
+                c.style.zIndex = '10';
+                c.style.borderColor = '#D4AF37';
+              } else {
+                c.style.transform = 'scale(0.96)';
+                c.style.filter = 'brightness(0.55) blur(1.5px)';
+                c.style.opacity = '0.5';
+                c.style.zIndex = '1';
+              }
+            });
+          });
+          card.addEventListener('mouseleave', () => {
+            cards.forEach(c => {
+              c.style.transform = '';
+              c.style.filter = '';
+              c.style.opacity = '';
+              c.style.zIndex = '';
+              c.style.borderColor = '';
+            });
+          });
+        });
+      }
+    })();
+  </script>
+
+</body>
+</html>

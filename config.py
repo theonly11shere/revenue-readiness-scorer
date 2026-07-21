@@ -1,18 +1,17 @@
 """
-Revenue Readiness Scorer Configuration
+Revenue Readiness Scorer — Configuration
 Single source of truth for all constants, thresholds, and templates.
-Environment-aware for Replit, Render, Railway, and local development.
 """
 
 import os
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Set
 
 # ── Core counts ───────────────────────────────────────────────────────────────
 TOTAL_CHECKS: int = 35
 CATEGORY_COUNT: int = 5
 CATEGORY_NAMES: List[str] = [
     "trust_signals",
-    "conversion_ready",
+    "conversion_ready", 
     "seo_foundation",
     "content_quality",
     "technical_health",
@@ -30,22 +29,16 @@ MAX_PAGES_PAID: int = 30
 MIN_PAGES_PER_TEMPLATE_PAID: int = 3
 
 # ── Request / fetch limits ─────────────────────────────────────────────────────
-REQUEST_TIMEOUT: int = 15          # seconds
-MAX_DOWNLOAD_SIZE: int = 10 * 1024 * 1024   # 10 MB
-PLAYWRIGHT_TIMEOUT: int = 30       # seconds
+REQUEST_TIMEOUT: int = 15
+MAX_DOWNLOAD_SIZE: int = 10 * 1024 * 1024
+PLAYWRIGHT_TIMEOUT: int = 30
 BLOCKED_PORTS: List[int] = [22, 25, 3306, 5432, 6379, 27017, 3389, 5900]
 
-# ── Private / reserved IP ranges (CIDR strings) ────────────────────────────────
+# ── Private / reserved IP ranges ────────────────────────────────────────────────
 PRIVATE_IP_RANGES: List[str] = [
-    "10.0.0.0/8",
-    "172.16.0.0/12",
-    "192.168.0.0/16",
-    "127.0.0.0/8",
-    "169.254.0.0/16",
-    "0.0.0.0/32",
-    "::1/128",
-    "fc00::/7",
-    "fe80::/10",
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+    "127.0.0.0/8", "169.254.0.0/16", "0.0.0.0/32",
+    "::1/128", "fc00::/7", "fe80::/10",
 ]
 
 # ── Rate limiting ──────────────────────────────────────────────────────────────
@@ -53,29 +46,21 @@ RATE_LIMIT_FREE: str = "10/minute"
 RATE_LIMIT_PAID: str = "100/minute"
 REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
-# ── Stripe ─────────────────────────────────────────────────────────────────────
+# ── Stripe & Email ─────────────────────────────────────────────────────────────
 STRIPE_WEBHOOK_SECRET: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
-# ── Admin alert email (Gmail SMTP via app password) ────────────────────────────
 SMTP_HOST: str = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER: str = os.environ.get("SMTP_USER", "")
 SMTP_PASS: str = os.environ.get("SMTP_PASS", "")
 ALERT_EMAIL: str = os.environ.get("ALERT_EMAIL", "onlyonearpit@gmail.com")
-# Resend HTTPS email API — preferred on Railway Hobby (outbound SMTP ports are blocked there).
-# Free tier: 100 emails/day, 3,000/month. Sign up at resend.com, create an API key.
 RESEND_API_KEY: str = os.environ.get("RESEND_API_KEY", "")
 EMAIL_FROM: str = os.environ.get("EMAIL_FROM", "RRS Alerts <onboarding@resend.dev>")
-
-# ── Scan passes (30-day unlimited for paying customers) ───────────────────────
 SCAN_PASS_SECRET: str = os.environ.get("SCAN_PASS_SECRET", "")
+OWN_DOMAINS: Set[str] = {d.strip().lower() for d in os.environ.get("OWN_DOMAINS", "trilloka.com,www.trilloka.com").split(",") if d.strip()}
 
-# Domains the radar must never roast (self guard-rail). Comma-separated env override.
-OWN_DOMAINS = {d.strip().lower() for d in os.environ.get("OWN_DOMAINS", "trilloka.com,www.trilloka.com").split(",") if d.strip()}
-
-
-# ── Template type patterns (regex → type) ───────────────────────────────────────
+# ── Template type patterns ───────────────────────────────────────────────────────
 TEMPLATE_PATTERNS: Dict[str, str] = {
-    r"^/$|^/index\.": "home",
+    r"^/$|^/index\\.": "home",
     r"product|shop|item|sku|buy|store": "product",
     r"service|solution|offering|capabilities": "service",
     r"blog|article|news|post|story": "blog",
@@ -85,7 +70,7 @@ TEMPLATE_PATTERNS: Dict[str, str] = {
     r"privacy|terms|policy|refund|shipping|legal|disclaimer": "policy",
 }
 
-# ── 35 Checkpoints across 5 categories ───────────────────────────────────────────
+# ── 35 Checkpoints ───────────────────────────────────────────────────────────
 CHECKPOINTS: Dict[str, Dict[str, Any]] = {
     "trust_signals": {
         "weight": 0.25,
@@ -158,25 +143,13 @@ SEVERITY: Dict[str, tuple] = {
     "excellent": (90, 100, "Excellent", "Industry-leading. Maintain and optimize."),
 }
 
-# ── Future predictions (months: traffic_loss_pct) ────────────────────────────────
+# ── Future predictions ─────────────────────────────────────────────────────────
 FUTURE_PREDICTIONS: Dict[str, Dict[int, int]] = {
     "critical": {3: 25, 6: 50, 12: 75},
     "poor": {3: 15, 6: 35, 12: 60},
     "fair": {3: 10, 6: 20, 12: 40},
     "good": {3: 5, 6: 10, 12: 20},
     "excellent": {3: 0, 6: 0, 12: 5},
-}
-
-# ── Threat templates for admin report ─────────────────────────────────────────
-THREAT_TEMPLATES: Dict[str, str] = {
-    "no_website": "Business has no online presence. Competitors capturing 100% of search traffic.",
-    "outdated_design": "Design signals low credibility. Visitors bounce before reading content.",
-    "no_cta": "No clear path to conversion. Visitors leave without taking action.",
-    "slow_speed": "Load time > 3s. 53% of mobile visitors abandon. Google penalizes in rankings.",
-    "ai_detected": "Content patterns match AI generation. Google AI Overviews may suppress this site.",
-    "no_reviews": "Zero social proof. Trust conversion rate drops by 67% without testimonials.",
-    "not_mobile": "Non-responsive design. 60%+ of traffic is mobile. Invisible to majority of users.",
-    "no_local_seo": "Missing local signals. Google Maps and local pack visibility is zero.",
 }
 
 # ── Content Evidence Signals checks ──────────────────────────────────────────────
@@ -196,48 +169,71 @@ DEFAULT_TRAFFIC: int = 1000
 DEFAULT_CONVERSION_RATE: float = 0.02
 DEFAULT_AOV: float = 75.0
 DEFAULT_PROFIT_MARGIN: float = 0.30
-CALCULATOR_LABEL: str = "Illustrative Revenue Exposure - Not Measured Loss."
-
-# ── Free report CTA ──────────────────────────────────────────────────────────────
+CALCULATOR_LABEL: str = "Illustrative Revenue Exposure — Not Measured Loss."
 FREE_REPORT_CTA: str = "Upgrade for full evidence, root cause, and fix steps."
 
-# ── Failure severity mapping by weight ─────────────────────────────────────────
+# ── Failure severity mapping ─────────────────────────────────────────────────
 FAILURE_SEVERITY_BY_WEIGHT: Dict[int, str] = {
-    1: "low",
-    2: "medium",
-    3: "high",
-    4: "critical",
-    5: "critical",
+    1: "low", 2: "medium", 3: "high", 4: "critical", 5: "critical",
 }
 
-# ── JS framework signatures (substring → framework name) ─────────────────────────
+# ── JS framework signatures ────────────────────────────────────────────────────
 JS_FRAMEWORK_SIGNATURES: Dict[str, str] = {
-    "__NEXT_DATA__": "Next.js",
-    "_next": "Next.js",
-    "data-reactroot": "React",
-    "react": "React",
-    "vue": "Vue",
-    "__VUE__": "Vue",
-    "ng-app": "Angular",
-    "angular": "Angular",
-    "data-svelte": "Svelte",
-    "svelte": "Svelte",
-    "window.gatsby": "Gatsby",
-    "___GATSBY": "Gatsby",
+    "__NEXT_DATA__": "Next.js", "_next": "Next.js",
+    "data-reactroot": "React", "react": "React",
+    "vue": "Vue", "__VUE__": "Vue",
+    "ng-app": "Angular", "angular": "Angular",
+    "data-svelte": "Svelte", "svelte": "Svelte",
+    "window.gatsby": "Gatsby", "___GATSBY": "Gatsby",
 }
 
+# ── Doppelgänger — Generic phrases ─────────────────────────────────────────────
+GENERIC_PHRASES: List[str] = [
+    "leverage our", "synergy", "digital landscape", "unlock the power",
+    "innovative solutions", "passionate about", "driven by excellence",
+    "cutting-edge", "next-generation", "holistic approach",
+    "best-in-class", "world-class", "industry-leading",
+    "transform your", "empower your", "elevate your",
+    "seamless experience", "end-to-end", "turnkey solution",
+    "scalable platform", "robust framework", "streamlined process",
+    "customer-centric", "data-driven", "results-oriented",
+    "proven track record", "trusted by", "all-in-one",
+    "ecosystem", "bandwidth", "our story", "mission is to",
+    "committed to delivering", "dedicated to providing",
+    "we pride ourselves", "excellence in everything",
+]
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Template fingerprints ──────────────────────────────────────────────────────
+TEMPLATE_SIGNATURES: List[tuple] = [
+    ("WordPress Astra", "wordpress", ["ast-container", "ast-", "astra-"], 1_200_000),
+    ("WordPress Elementor", "wordpress", ["elementor-", "elementor/"], 5_000_000),
+    ("WordPress Divi", "wordpress", ["et_pb_", "divi-"], 800_000),
+    ("WordPress Avada", "wordpress", ["avada-", "fusion-"], 700_000),
+    ("Shopify Dawn", "shopify", ["shopify-section", "shopify-dawn"], 2_000_000),
+    ("Shopify Prestige", "shopify", ["prestige-", "shopify-prestige"], 400_000),
+    ("Wix", "wix", ["wix-", "static.wixstatic.com"], 3_000_000),
+    ("Squarespace", "squarespace", ["squarespace-", "static1.squarespace.com"], 1_500_000),
+    ("Webflow", "webflow", ["w-webflow-badge", "webflow-"], 600_000),
+    ("Bootstrap", "framework", ["bootstrap", "container-fluid", "row", "col-"], 10_000_000),
+    ("Tailwind", "framework", ["tailwind", "bg-", "text-", "flex", "grid-cols-"], 8_000_000),
+    ("AI Builder / Generic", "ai", ["ai-generated", "auto-generated", "template-"], 500_000),
+]
+
+# ── Social complaint keywords ────────────────────────────────────────────────────
+COMPLAINT_KEYWORDS: tuple = (
+    "broken", "not working", "doesn't work", "slow", "scam", "ripoff",
+    "terrible", "worst", "avoid", "awful", "useless", "never again",
+    "down", "error", "complaint", "bad experience", "unresponsive",
+)
+
+
 def get_total_checks() -> int:
-    """Return the total number of checkpoints across all categories."""
     return sum(len(cfg["items"]) for cfg in CHECKPOINTS.values())
 
 
 def get_category_check_count(category: str) -> int:
-    """Return the number of checkpoints in a single category."""
     return len(CHECKPOINTS.get(category, {}).get("items", []))
 
 
 def get_failure_severity(weight: int) -> str:
-    """Map a checkpoint weight to a severity label."""
     return FAILURE_SEVERITY_BY_WEIGHT.get(weight, "medium")
