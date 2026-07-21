@@ -209,6 +209,7 @@ body {
   .domain-input { width: 100%; }
 }
 </style>
+<base target="_blank">
 </head>
 <body>
 
@@ -247,7 +248,7 @@ body {
 </div>
 
 <script>
-const API_BASE = '';
+const API_BASE = 'https://api.trilloka.com';
 const loadingMessages = [
   "Crawling page architecture...",
   "Detecting template fingerprints...",
@@ -287,7 +288,7 @@ async function startScan() {
     // Store result and navigate to results page
     sessionStorage.setItem('rrs_result', JSON.stringify(data));
     sessionStorage.setItem('rrs_domain', input);
-    window.location.href = '/results';
+    window.location.href = 'https://api.trilloka.com/results?domain=' + encodeURIComponent(input);
 
   } catch (err) {
     clearInterval(msgInterval);
@@ -316,7 +317,7 @@ async function startScan() {
     };
     sessionStorage.setItem('rrs_result', JSON.stringify(demoData));
     sessionStorage.setItem('rrs_domain', input);
-    window.location.href = '/results';
+    window.location.href = 'https://api.trilloka.com/results?domain=' + encodeURIComponent(input);
   }
 }
 
