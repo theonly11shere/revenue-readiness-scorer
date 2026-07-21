@@ -215,6 +215,16 @@ body {
 <div class="bg-grid"></div>
 <div class="bg-glow"></div>
 
+<header style="position:fixed;top:0;left:0;right:0;z-index:100;display:flex;justify-content:space-between;align-items:center;padding:20px 40px;border-bottom:1px solid rgba(212,175,55,0.08);">
+  <div style="font-family:'Space Grotesk',sans-serif;font-size:1.3rem;font-weight:700;letter-spacing:3px;text-transform:uppercase;color:#d4af37;">TRILLOKA</div>
+  <nav style="display:flex;gap:32px;font-size:0.75rem;letter-spacing:2px;text-transform:uppercase;">
+    <a href="/" style="color:#7a7880;text-decoration:none;transition:color 0.3s;">Solutions</a>
+    <a href="/vlog" style="color:#7a7880;text-decoration:none;transition:color 0.3s;">Vlog</a>
+    <a href="/contact" style="color:#7a7880;text-decoration:none;transition:color 0.3s;">Contact</a>
+  </nav>
+</header>
+
+
 <div class="logo-3d">TRILLOKA</div>
 
 <p class="tagline">
@@ -277,7 +287,7 @@ async function startScan() {
     // Store result and navigate to results page
     sessionStorage.setItem('rrs_result', JSON.stringify(data));
     sessionStorage.setItem('rrs_domain', input);
-    window.location.href = 'results.html';
+    window.location.href = '/results';
 
   } catch (err) {
     clearInterval(msgInterval);
@@ -306,7 +316,7 @@ async function startScan() {
     };
     sessionStorage.setItem('rrs_result', JSON.stringify(demoData));
     sessionStorage.setItem('rrs_domain', input);
-    window.location.href = 'results.html';
+    window.location.href = '/results';
   }
 }
 

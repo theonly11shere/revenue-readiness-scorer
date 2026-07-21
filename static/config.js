@@ -8,19 +8,19 @@ window.TRILLOKA_CONFIG = {
     confirmPasswordHash: "8e1712a523ffc076094b78b261374b7f",
     nav: {
       links: [
-        { label: "Home", href: "index.html" },
-        { label: "Solutions", href: "solutions.html" },
-        { label: "Vlog", href: "vlog.html" },
-        { label: "Contact", href: "contact.html" }
+        { label: "Home", href: "/" },
+        { label: "Solutions", href: "/" },
+        { label: "Vlog", href: "/vlog" },
+        { label: "Contact", href: "/contact" }
       ]
     },
     footer: {
       copy: "Revenue Readiness Systems",
       links: [
-        { label: "Home", href: "index.html" },
-        { label: "Solutions", href: "solutions.html" },
-        { label: "Vlog", href: "vlog.html" },
-        { label: "Contact", href: "contact.html" }
+        { label: "Home", href: "/" },
+        { label: "Solutions", href: "/" },
+        { label: "Vlog", href: "/vlog" },
+        { label: "Contact", href: "/contact" }
       ]
     }
   },
@@ -45,7 +45,7 @@ window.TRILLOKA_CONFIG = {
     {
       id: "frontend",
       title: "Revenue Readiness Scanner — Trilloka",
-      file: "frontend.html",
+      file: "results.html",
       theme: "dark",
       meta: { description: "Run a free 4-point revenue readiness scan on any website." },
       sections: [

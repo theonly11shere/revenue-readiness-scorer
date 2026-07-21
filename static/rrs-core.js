@@ -2,7 +2,7 @@
 (function (window) {
   'use strict';
 
-  const API_BASE = 'https://revenue-readiness-scorer-production.up.railway.app';
+  const API_BASE = '';
 
   const CONFIG = window.TRILLOKA_CONFIG || {};
   const theme = (CONFIG.themes && CONFIG.themes.dark) ? CONFIG.themes.dark.colors : {};
@@ -76,7 +76,11 @@
 
   async function fetchScanData(domain) {
     try {
-      const res = await fetch(`${API_BASE}/api/scan?domain=${encodeURIComponent(domain)}`);
+      const res = await fetch(`${API_BASE}/api/v1/scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: domain, tier: 'free' })
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
