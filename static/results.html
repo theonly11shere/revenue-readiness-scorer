@@ -99,6 +99,11 @@
       width: 700px;
       height: 700px;
       flex-shrink: 0;
+      margin: 0 auto;
+    }
+
+    .orbital-container * {
+      box-sizing: border-box;
     }
 
     /* Center hub */
@@ -225,6 +230,13 @@
     .score-card.sameness { transform: translate(-50%, -50%) translate(240px, 0); }
     .score-card.presence { transform: translate(-50%, -50%) translate(0, 240px); }
     .score-card.visual { transform: translate(-50%, -50%) translate(-240px, 0); }
+
+    /* Ensure cards stay positioned even if parent is small */
+    .score-card {
+      position: absolute !important;
+      top: 50% !important;
+      left: 50% !important;
+    }
 
     .score-card .metric-name {
       font-family: 'DM Sans', sans-serif;
