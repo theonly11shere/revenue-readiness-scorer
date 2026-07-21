@@ -185,6 +185,10 @@ async def serve_results():
     return HTMLResponse(content="<h1>RRS Results</h1><p>Results page not found. Place results.html in /static/</p>")
 
 
+# ── API Endpoints ─────────────────────────────────────────
+
+
+
 @app.get("/vlog", response_class=HTMLResponse)
 @app.get("/vlog.html", response_class=HTMLResponse)
 async def serve_vlog():
@@ -193,7 +197,7 @@ async def serve_vlog():
     if os.path.exists(vlog_path):
         with open(vlog_path, "r") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>RRS Vlog</h1><p>Vlog page not found. Place vlog.html in /static/</p>")
+    return HTMLResponse(content="<h1>Vlog</h1><p>Vlog page not found.</p>")
 
 
 @app.get("/contact", response_class=HTMLResponse)
@@ -204,11 +208,7 @@ async def serve_contact():
     if os.path.exists(contact_path):
         with open(contact_path, "r") as f:
             return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>RRS Contact</h1><p>Contact page not found. Place contact.html in /static/</p>")
-
-
-
-# ── API Endpoints ─────────────────────────────────────────
+    return HTMLResponse(content="<h1>Contact</h1><p>Contact page not found.</p>")
 
 @app.get("/api/health")
 async def health_check():
