@@ -164,14 +164,7 @@ def get_trilloka_attitude(domain: str) -> dict:
 
 # ── Static Pages ──────────────────────────────────────────
 
-@app.get("/", response_class=HTMLResponse)
-async def serve_index():
-    """Serve the landing page."""
-    index_path = os.path.join(STATIC_DIR, "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>RRS API</h1><p>Landing page not found. Place index.html in /static/</p>")
+
 
 
 @app.get("/results", response_class=HTMLResponse)
@@ -189,26 +182,10 @@ async def serve_results():
 
 
 
-@app.get("/vlog", response_class=HTMLResponse)
-@app.get("/vlog.html", response_class=HTMLResponse)
-async def serve_vlog():
-    """Serve the vlog page."""
-    vlog_path = os.path.join(STATIC_DIR, "vlog.html")
-    if os.path.exists(vlog_path):
-        with open(vlog_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Vlog</h1><p>Vlog page not found.</p>")
 
 
-@app.get("/contact", response_class=HTMLResponse)
-@app.get("/contact.html", response_class=HTMLResponse)
-async def serve_contact():
-    """Serve the contact page."""
-    contact_path = os.path.join(STATIC_DIR, "contact.html")
-    if os.path.exists(contact_path):
-        with open(contact_path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Contact</h1><p>Contact page not found.</p>")
+
+
 
 @app.get("/api/health")
 async def health_check():
