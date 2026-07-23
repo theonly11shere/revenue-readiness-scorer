@@ -166,12 +166,112 @@ class WebsiteScraper:
                     "--disable-renderer-backgrounding",
                     "--force-color-profile=srgb",
                     "--metrics-recording-only",
+                    "--disable-blink-features=AutomationControlled",
                 ],
             )
             return True
         except Exception as e:
             print(f"[scraper] Browser init failed: {e}")
             return False
+
+    async def _apply_stealth(self, page) -> None:
+        """Inject stealth JS to mask automation indicators."""
+        stealth_js = """
+        // Override navigator.webdriver
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => undefined
+        });
+
+        // Fake plugins
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => [
+                {
+                    0: {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format"},
+                    description: "Portable Document Format",
+                    filename: "internal-pdf-viewer",
+                    length: 1,
+                    name: "Chrome PDF Plugin"
+                },
+                {
+                    0: {type: "application/pdf", suffixes: "pdf", description: ""},
+                    description: "",
+                    filename: "mhjfbmdgcfjbbpaeojofohoefgiehjai",
+                    length: 1,
+                    name: "Chrome PDF Viewer"
+                },
+                {
+                    description: "Native Client module",
+                    filename: "internal-nacl-plugin",
+                    length: 2,
+                    name: "Native Client",
+                    item: () => { return {type: "application/x-nacl"}; }
+                }
+            ]
+        });
+
+        // Fake mimeTypes
+        Object.defineProperty(navigator, 'mimeTypes', {
+            get: () => [
+                {type: "application/pdf", suffixes: "pdf", description: "", enabledPlugin: {name: "Chrome PDF Viewer"}},
+                {type: "application/x-google-chrome-pdf", suffixes: "pdf", description: "Portable Document Format", enabledPlugin: {name: "Chrome PDF Plugin"}},
+                {type: "application/x-nacl", suffixes: "", description: "", enabledPlugin: {name: "Native Client"}}
+            ]
+        });
+
+        // Fake chrome object
+        window.chrome = {
+            runtime: {
+                OnInstalledReason: {CHROME_UPDATE: "chrome_update"},
+                OnRestartRequiredReason: {APP_UPDATE: "app_update"},
+                PlatformArch: {ARM: "arm"},
+                PlatformNaclArch: {ARM: "arm"},
+                PlatformOs: {ANDROID: "android"},
+                RequestUpdateCheckStatus: {NO_UPDATE: "no_update"},
+            }
+        };
+
+        // Hide automation from permissions
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters) => (
+            parameters.name === 'notifications' ?
+                Promise.resolve({ state: Notification.permission }) :
+                originalQuery(parameters)
+        );
+
+        // Override Notification.permission
+        if (Notification.permission === 'default') {
+            Object.defineProperty(Notification, 'permission', { get: () => 'default' });
+        }
+
+        // Patch iframe contentWindow to pass through
+        const originalAttachShadow = Element.prototype.attachShadow;
+        Element.prototype.attachShadow = function attachShadow(options) {
+            return originalAttachShadow.call(this, options);
+        };
+
+        // Fake languages
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['en-US', 'en']
+        });
+
+        // Hide Playwright-specific properties
+        delete window.__playwright;
+        delete window.__pw_manual;
+        delete window.__PW_inspect;
+
+        // Override toString to hide patches
+        const patchToString = (obj, prop, value) => {
+            try {
+                Object.defineProperty(obj, prop, {
+                    get: () => value,
+                    set: undefined,
+                    enumerable: true,
+                    configurable: true
+                });
+            } catch(e) {}
+        };
+        """
+        await page.add_init_script(stealth_js)
 
     async def _close_browser(self):
         if self.browser:
@@ -187,8 +287,11 @@ class WebsiteScraper:
         ctx = await self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
             device_scale_factor=1,
+            locale="en-US",
+            timezone_id="America/New_York",
         )
         page = await ctx.new_page()
+        await self._apply_stealth(page)
         try:
             await page.goto(self.url, wait_until="networkidle", timeout=30000)
             os.makedirs("/tmp/screenshots", exist_ok=True)
@@ -206,8 +309,11 @@ class WebsiteScraper:
             return {"status": "failed", "error": "Browser not available"}
         ctx = await self.browser.new_context(
             viewport={"width": 1920, "height": 1080},
+            locale="en-US",
+            timezone_id="America/New_York",
         )
         page = await ctx.new_page()
+        await self._apply_stealth(page)
         try:
             start = time.time()
             await page.goto(self.url, wait_until="networkidle", timeout=30000)
@@ -277,8 +383,11 @@ class WebsiteScraper:
                 viewport={"width": dev["width"], "height": dev["height"]},
                 device_scale_factor=dev["scale"],
                 user_agent="Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15",
+                locale="en-US",
+                timezone_id="America/New_York",
             )
             page = await ctx.new_page()
+            await self._apply_stealth(page)
             try:
                 await page.goto(self.url, wait_until="networkidle", timeout=30000)
                 has_viewport = await page.query_selector("meta[name=viewport]") is not None
