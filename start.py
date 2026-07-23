@@ -1,8 +1,4 @@
-"""
-Universal startup script for Replit, Render, Railway, and local dev.
-Reads PORT from environment; defaults to 8000 locally.
-"""
-
+"""Universal startup script for Replit, Render, Railway, and local dev."""
 import os
 import uvicorn
 

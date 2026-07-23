@@ -1,17 +1,7 @@
 #!/usr/bin/env python3
-"""
-RRS — Revenue Readiness Scorer
-Main entry point. Run with: python main.py
-"""
-
+"""RRS — Revenue Readiness Scorer. Main entry point."""
 import uvicorn
 from api import app
 
 if __name__ == "__main__":
-    uvicorn.run(
-        "api:app",
-        host="0.0.0.0",
-        port=8000,
-        reload=True,
-        log_level="info",
-    )
+    uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True, log_level="info")

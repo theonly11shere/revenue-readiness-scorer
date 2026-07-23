@@ -1,14 +1,8 @@
 """
 Branded PDF renderer for the Revenue Readiness Report.
-
-Turns the raw report JSON into a clean, branded document the founder can
-forward straight to the customer. Full truth, no softening — every failure,
-every score, the doppelganger analysis, and a closing page with the two
-next moves (roadmap + free one-time session, or hire the Architect).
-
+Turns the raw report JSON into a clean, branded document.
 Uses fpdf2 (pure Python — no system dependencies, Railway-safe).
 """
-
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -26,31 +20,23 @@ _REPLACEMENTS = {
     "\u00e4": "a", "\u00e9": "e", "\u2713": "v", "\u2192": "->", "\u00d7": "x",
 }
 
-
 def _t(text: Any) -> str:
-    """Make text safe for PDF core fonts (latin-1)."""
     out = str(text if text is not None else "")
     for k, v in _REPLACEMENTS.items():
         out = out.replace(k, v)
     return out.encode("latin-1", "replace").decode("latin-1")
 
-
 def _band_color(score: float) -> Tuple[int, int, int]:
-    if score >= 70:
-        return GREEN
-    if score >= 40:
-        return AMBER
+    if score >= 70: return GREEN
+    if score >= 40: return AMBER
     return RED
 
-
 def _presence_color(verdict: str) -> Tuple[int, int, int]:
-    return {"discussed": GREEN, "quiet": AMBER, "invisible": RED, "own": GOLD}.get(verdict, MUTED)
-
+    return {"discussed": GREEN, "quiet": AMBER, "invisible": RED, "own": GOLD, "loud": GREEN, "emerging": AMBER}.get(verdict, MUTED)
 
 class _ReportPDF:
     def __init__(self, report: Dict[str, Any], url: str, lead_email: Optional[str], tier: str):
-        from fpdf import FPDF  # fpdf2 — pure python
-
+        from fpdf import FPDF
         self.report = report
         self.url = url
         self.lead_email = lead_email
@@ -58,10 +44,7 @@ class _ReportPDF:
         self.pdf = FPDF(orientation="P", unit="mm", format="A4")
         self.pdf.set_margins(15, 22, 15)
         self.pdf.set_auto_page_break(auto=True, margin=18)
-
-        # register per-page brand header/footer
         pdf = self.pdf
-
         def _header():
             pdf.set_fill_color(*DARK)
             pdf.rect(0, 0, 210, 14, "F")
@@ -72,8 +55,7 @@ class _ReportPDF:
             pdf.set_font("helvetica", "", 8)
             pdf.set_text_color(245, 230, 200)
             pdf.cell(0, 7, "trilloka.com", align="R")
-            pdf.set_xy(15, 22)  # hand content flow back to the top margin
-
+            pdf.set_xy(15, 22)
         def _footer():
             pdf.set_y(-14)
             pdf.set_draw_color(*GOLD)
@@ -84,11 +66,9 @@ class _ReportPDF:
             pdf.set_text_color(*MUTED)
             pdf.cell(120, 6, "Prepared by The Architect - trilloka.com")
             pdf.cell(0, 6, f"Page {pdf.page_no()}", align="R")
+        self.pdf.header = _header
+        self.pdf.footer = _footer
 
-        self.pdf.header = _header  # type: ignore[attr-defined]
-        self.pdf.footer = _footer  # type: ignore[attr-defined]
-
-    # ---------- layout helpers ----------
     def _section(self, title: str) -> None:
         pdf = self.pdf
         pdf.ln(4)
@@ -121,28 +101,28 @@ class _ReportPDF:
         pdf.set_text_color(*color)
         pdf.multi_cell(0, 5.2, _t(prefix + text), new_x="LMARGIN", new_y="NEXT")
 
-    # ---------- sections ----------
     def _cover(self) -> None:
         from urllib.parse import urlparse
         pdf = self.pdf
         domain = urlparse(self.url).hostname or self.url
         when = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        # Label by what's inside, not the scan tier — the founder forwards this.
         if self.report.get("roadmap"):
             tier_label = "Full Report + Fix Roadmap"
         elif self.report.get("fix_steps"):
             tier_label = "Full Report"
         else:
             tier_label = "Free Scan"
-
         pdf.ln(10)
         pdf.set_font("helvetica", "B", 22)
         pdf.set_text_color(*DARK)
         pdf.multi_cell(0, 9, _t(domain), new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("helvetica", "", 10)
         pdf.set_text_color(*MUTED)
-        pdf.cell(0, 6, _t(f"{tier_label}  |  {when}" + (f"  |  Lead: {self.lead_email}" if self.lead_email else "")),
-                 new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, _t(f"{tier_label}  |  {when}" + (f"  |  Lead: {self.lead_email}" if self.lead_email else "")), new_x="LMARGIN", new_y="NEXT")
+        # Business type
+        btype = self.report.get("business_type", {})
+        if btype and btype.get("detected_type"):
+            pdf.cell(0, 6, _t(f"Business Type: {btype['detected_type'].title()} (confidence: {btype.get('confidence', 0)}%)"), new_x="LMARGIN", new_y="NEXT")
         pdf.ln(2)
 
     def _scores(self) -> None:
@@ -150,12 +130,9 @@ class _ReportPDF:
         scores = self.report.get("scores") or {}
         sev = self.report.get("severity") or {}
         self._section("The Score")
-        for label, key in (("Revenue Readiness", "readiness_score"),
-                           ("Evidence Coverage", "evidence_coverage"),
-                           ("Confidence", "confidence_score")):
+        for label, key in (("Revenue Readiness", "readiness_score"), ("Evidence Coverage", "evidence_coverage"), ("Confidence", "confidence_score")):
             v = scores.get(key)
-            if v is None:
-                continue
+            if v is None: continue
             self._kv(label, f"{v} / 100", _band_color(v))
         label = sev.get("label") or ""
         desc = sev.get("desc") or ""
@@ -164,6 +141,34 @@ class _ReportPDF:
             self._para(f"Verdict: {label}", size=12, color=DARK, bold=True)
         if desc:
             self._para(f'"{desc}"', color=MUTED)
+
+    def _performance(self) -> None:
+        perf = self.report.get("performance") or {}
+        if not perf:
+            return
+        self._section("Real Performance Data")
+        lh = perf.get("lighthouse", {})
+        if lh:
+            self._kv("Largest Contentful Paint", f"{lh.get('lcp', 'N/A')}s", GREEN if lh.get('lcp', 999) < 2.5 else RED)
+            self._kv("First Contentful Paint", f"{lh.get('fcp', 'N/A')}s")
+            self._kv("Layout Shifts", str(lh.get('layout_shifts', 'N/A')))
+        mobile = perf.get("mobile_test", {})
+        if mobile.get("tested"):
+            passed = "PASS" if mobile.get("pass") else "FAIL"
+            color = GREEN if mobile.get("pass") else RED
+            self._kv("Mobile Responsive (Real Test)", passed, color)
+            for issue in mobile.get("issues", []):
+                self._bullet(issue, RED)
+        ssl = perf.get("ssl_valid", {})
+        if ssl:
+            valid = "VALID" if ssl.get("valid") else "INVALID"
+            color = GREEN if ssl.get("valid") else RED
+            self._kv("SSL Certificate", valid, color)
+            if ssl.get("tls_version"):
+                self._kv("TLS Version", ssl["tls_version"])
+        sec = perf.get("security_headers", {})
+        if sec:
+            self._kv("Security Headers", f"{sec.get('score', 0)}/{sec.get('max', 6)} present", _band_color((sec.get('score', 0) / max(sec.get('max', 1), 1)) * 100))
 
     def _doppelganger(self) -> None:
         fp = self.report.get("template_fingerprint") or {}
@@ -188,12 +193,18 @@ class _ReportPDF:
         if vt:
             twin = vt.get("closest_match_url") or "none yet"
             self._kv("Visual twin", f"{vt.get('similarity_percent', 0)}% layout match - {twin}", RED if (vt.get("similarity_percent") or 0) >= 70 else INK)
+            if vt.get("ssim_score"):
+                self._kv("SSIM Score", f"{vt['ssim_score']}")
             elems = vt.get("matching_elements") or []
             if elems:
                 self._kv("Matching elements", ", ".join(elems))
         if sp:
             verdict = sp.get("verdict") or ""
             self._kv("Online presence", f"{sp.get('mentions_found', 0)} public mentions - {sp.get('verdict_label', '')}", _presence_color(verdict))
+            sources = sp.get("sources", {})
+            if sources:
+                src_str = ", ".join([f"{k}: {v}" for k, v in sources.items()])
+                self._kv("Sources checked", src_str)
             for neg in sp.get("negative_examples") or []:
                 self._bullet(neg, RED, prefix="- NEGATIVE: ")
             for pos in sp.get("positive_examples") or []:
@@ -206,15 +217,14 @@ class _ReportPDF:
         if not fails and not fixes:
             return
         self._section("What is broken - every issue, no sugar-coating")
-        if fixes:  # paid tiers: full detail with fix steps
+        if fixes:
             for f in fixes:
                 self._bullet(f"[{str(f.get('severity', '')).upper()}] {f.get('item', '')}", RED if str(f.get("severity")) == "critical" else INK, prefix="")
                 for step in (f.get("fix_steps") or []):
                     self._bullet(step, MUTED, prefix="    ")
         else:
             for f in fails:
-                self._bullet(f"[{str(f.get('severity', '')).upper()}] {f.get('one_liner') or f.get('item', '')}",
-                             RED if str(f.get('severity')) in ("critical", "high") else INK)
+                self._bullet(f"[{str(f.get('severity', '')).upper()}] {f.get('one_liner') or f.get('item', '')}", RED if str(f.get('severity')) in ("critical", "high") else INK)
         if hidden:
             self.pdf.ln(1)
             self._para(f"+ {hidden} more issues are documented in the full report.", color=MUTED, bold=True)
@@ -233,7 +243,6 @@ class _ReportPDF:
 
     def _cta(self) -> None:
         pdf = self.pdf
-        # The whole CTA block (~100mm) must sit on one page — no orphan lines.
         if pdf.get_y() > 155:
             pdf.add_page()
         self._section("Your next move")
@@ -266,6 +275,7 @@ class _ReportPDF:
         self.pdf.add_page()
         self._cover()
         self._scores()
+        self._performance()
         self._doppelganger()
         self._failures()
         self._roadmap()
@@ -274,5 +284,4 @@ class _ReportPDF:
 
 
 def build_report_pdf(report: Dict[str, Any], url: str, lead_email: Optional[str] = None, tier: str = "free") -> bytes:
-    """Render the report JSON to branded PDF bytes. Raises if fpdf2 is missing."""
     return _ReportPDF(report, url, lead_email, tier).build()
