@@ -420,3 +420,6 @@ if __name__ == '__main__':
         
     finally:
         scraper.close()
+
+# Alias for backward compatibility
+WebsiteScraper = WebScraper
