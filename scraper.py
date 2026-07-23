@@ -409,7 +409,7 @@ class WebsiteScraper:
             return []
         for tag in self.soup.find_all(style=True):
             style = tag["style"]
-            found = re.findall(r"font-family:\s*['"]?([^;'"]+)", style)
+            found = re.findall(r'''font-family:\s*['"]?([^;'"]+)''', style)
             fonts.update(found)
         for link in self.soup.find_all("link", rel="stylesheet"):
             href = link.get("href", "")
