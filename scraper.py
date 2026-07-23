@@ -102,7 +102,7 @@ class WebsiteScraper:
             "visual_fingerprint": self._visual_fingerprint(),
             "ssl_valid": self._check_ssl(),
             "security_headers": self._check_security_headers(headers),
-            "broken_links_full": self._check_broken_links() if self.tier == "paid" else {"status": "skipped", "reason": "free tier"},
+            "broken_links_full": self._check_broken_links(),
             "screenshot_path": None,
             "lighthouse": {},
             "mobile_test": {},
