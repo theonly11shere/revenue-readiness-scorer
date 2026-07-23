@@ -240,11 +240,11 @@ async def payment_options():
             {
                 "id": "paypal",
                 "name": "PayPal",
-                "description": "Send to: onlyonearpit@gmail.com",
+                "description": "Send to: arpitsavyauk@gmail.com",
                 "enabled": True,
                 "icon": "paypal",
                 "action": "manual",
-                "instructions": "Send payment to onlyonearpit@gmail.com via PayPal. Include your domain in the note.",
+                "instructions": "Send payment to arpitsavyauk@gmail.com via PayPal. Include your domain in the note.",
             },
             {
                 "id": "interac",
@@ -253,7 +253,7 @@ async def payment_options():
                 "enabled": True,
                 "icon": "bank",
                 "action": "manual",
-                "instructions": "Send e-Transfer to onlyonearpit@gmail.com. Password: trilloka2026",
+                "instructions": "Send e-Transfer to arpitsavyauk@gmail.com. Password: trilloka2026",
             },
             {
                 "id": "crypto",
@@ -262,7 +262,7 @@ async def payment_options():
                 "enabled": True,
                 "icon": "bitcoin",
                 "action": "manual",
-                "instructions": "Send USDT (TRC20) to your wallet. Contact onlyonearpit@gmail.com for wallet address.",
+                "instructions": "Send USDT (TRC20) to your wallet. Contact arpitsavyauk@gmail.com for wallet address.",
             },
         ],
         "pricing": {
@@ -270,7 +270,7 @@ async def payment_options():
             "roadmap": PRICING.get("roadmap", 299),
             "retainer": PRICING.get("retainer", 997),
         },
-        "contact_email": "onlyonearpit@gmail.com",
+        "contact_email": "arpitsavyauk@gmail.com",
     }
 
 # ── API Endpoints ───────────────────────────────────────────────────────────
@@ -587,13 +587,13 @@ async def create_checkout(payment: PaymentRequest):
 
         instructions = {
             "paypal": {
-                "send_to": "onlyonearpit@gmail.com",
+                "send_to": "arpitsavyauk@gmail.com",
                 "amount": f"${price} USD",
                 "note": f"RRS {payment.tier.title()} Report — {payment.domain}",
                 "action": "Send via PayPal Friends & Family or Goods & Services",
             },
             "interac": {
-                "send_to": "onlyonearpit@gmail.com",
+                "send_to": "arpitsavyauk@gmail.com",
                 "amount": f"${price} CAD",
                 "security_question": "What service is this?",
                 "security_answer": "trilloka",
@@ -601,7 +601,7 @@ async def create_checkout(payment: PaymentRequest):
             },
             "crypto": {
                 "accepted": "USDT (TRC20), BTC, ETH",
-                "contact": "onlyonearpit@gmail.com",
+                "contact": "arpitsavyauk@gmail.com",
                 "action": "Email for wallet address and send equivalent USD amount",
             },
         }
