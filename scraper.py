@@ -28,7 +28,7 @@ class WebsiteScraper:
         self.url = url.rstrip("/")
         self.domain = urlparse(self.url).netloc.replace("www.", "")
         self.tier = tier
-        self.use_playwright = use_playwright if use_playwright is not None else (tier == "paid")
+        self.use_playwright = use_playwright if use_playwright is not None else True
         self.raw_html = ""
         self.soup = None
         self.browser = None
@@ -39,17 +39,27 @@ class WebsiteScraper:
     def scrape(self) -> Dict[str, Any]:
         """Synchronous entry point called by api.py.
         Handles both standalone and already-running-event-loop contexts (FastAPI)."""
+        # Try nest_asyncio first (best for FastAPI/Jupyter nested loops)
+        try:
+            import nest_asyncio
+            nest_asyncio.apply()
+        except ImportError:
+            pass
+
         try:
             loop = asyncio.get_running_loop()
+            # Already inside an async loop — use nest_asyncio if available,
+            # otherwise run in a separate thread.
+            try:
+                import nest_asyncio
+                return loop.run_until_complete(self._scrape_async())
+            except ImportError:
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                    return executor.submit(lambda: asyncio.run(self._scrape_async())).result()
         except RuntimeError:
             # No loop running — safe to use asyncio.run
             return asyncio.run(self._scrape_async())
-
-        # Already inside an async loop (e.g., FastAPI/uvicorn).
-        # Run the coroutine in a separate thread with its own event loop.
-        import concurrent.futures
-        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            return executor.submit(lambda: asyncio.run(self._scrape_async())).result()
 
     # ── Async Core ──────────────────────────────────────────────────────────
 
@@ -92,7 +102,7 @@ class WebsiteScraper:
             "visual_fingerprint": self._visual_fingerprint(),
             "ssl_valid": self._check_ssl(),
             "security_headers": self._check_security_headers(headers),
-            "broken_links_full": self._check_broken_links() if self.tier == "paid" else {},
+            "broken_links_full": self._check_broken_links() if self.tier == "paid" else {"status": "skipped", "reason": "free tier"},
             "screenshot_path": None,
             "lighthouse": {},
             "mobile_test": {},
@@ -100,7 +110,13 @@ class WebsiteScraper:
         }
 
         # 3. Playwright features (screenshot, lighthouse, mobile)
-        if self.use_playwright and PLAYWRIGHT_AVAILABLE:
+        if not self.use_playwright:
+            data["lighthouse"] = {"status": "skipped", "reason": f"use_playwright=False (tier={self.tier}). Set tier=paid or use_playwright=true"}
+            data["mobile_test"] = {"status": "skipped", "reason": f"use_playwright=False (tier={self.tier}). Set tier=paid or use_playwright=true"}
+        elif not PLAYWRIGHT_AVAILABLE:
+            data["lighthouse"] = {"status": "skipped", "reason": "Playwright not installed"}
+            data["mobile_test"] = {"status": "skipped", "reason": "Playwright not installed"}
+        else:
             pw_ok = await self._init_browser()
             if pw_ok:
                 try:
@@ -118,6 +134,9 @@ class WebsiteScraper:
                     data["mobile_test"] = {"status": "failed", "error": str(e)}
                 finally:
                     await self._close_browser()
+            else:
+                data["lighthouse"] = {"status": "failed", "error": "Browser initialization failed. Check Railway logs for details."}
+                data["mobile_test"] = {"status": "failed", "error": "Browser initialization failed. Check Railway logs for details."}
 
         return data
 
