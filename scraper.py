@@ -37,15 +37,19 @@ class WebsiteScraper:
     # ── Public API ──────────────────────────────────────────────────────────
 
     def scrape(self) -> Dict[str, Any]:
-        """Synchronous entry point called by api.py"""
+        """Synchronous entry point called by api.py.
+        Handles both standalone and already-running-event-loop contexts (FastAPI)."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError("loop closed")
+            loop = asyncio.get_running_loop()
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop.run_until_complete(self._scrape_async())
+            # No loop running — safe to use asyncio.run
+            return asyncio.run(self._scrape_async())
+
+        # Already inside an async loop (e.g., FastAPI/uvicorn).
+        # Run the coroutine in a separate thread with its own event loop.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            return executor.submit(lambda: asyncio.run(self._scrape_async())).result()
 
     # ── Async Core ──────────────────────────────────────────────────────────
 
