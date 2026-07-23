@@ -29,6 +29,7 @@ from scorer import (
 )
 from content_evidence_signals import ContentEvidenceSignals
 from reporter import ReportGenerator
+from report_pdf import build_report_pdf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("rrs")
@@ -36,9 +37,11 @@ logger = logging.getLogger("rrs")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 SCREENSHOT_STATIC = os.path.join(STATIC_DIR, "screenshots")
+REPORTS_STATIC = os.path.join(STATIC_DIR, "reports")
 os.makedirs(STATIC_DIR, exist_ok=True)
 os.makedirs(SCREENSHOT_STATIC, exist_ok=True)
 os.makedirs(SCREENSHOT_DIR, exist_ok=True)
+os.makedirs(REPORTS_STATIC, exist_ok=True)
 
 # ── Redis Setup (FAIL SECURE) ───────────────────────────────────────────────
 redis_client = None
@@ -75,9 +78,10 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # ── Pydantic Models ──────────────────────────────────────────────────────────
 class ScanRequest(BaseModel):
     url: str = Field(..., min_length=4, max_length=500, description="Domain or URL to scan")
-    tier: str = Field(default="free", pattern="^(free|paid)$")
+    tier: str = Field(default="free", pattern="^(free|paid|roadmap|retainer)$")
     use_playwright: Optional[bool] = None
     business_type: Optional[str] = Field(default=None, pattern="^(ecommerce|saas|local_service|b2b|agency|personal_brand)$")
+    lead_email: Optional[str] = Field(default=None, description="Lead email for report delivery")
 
     @validator("url")
     def validate_url(cls, v):
@@ -100,6 +104,15 @@ class PaymentRequest(BaseModel):
     domain: str = Field(..., min_length=3, max_length=200)
     success_url: str
     cancel_url: str
+    method: str = Field(default="stripe", pattern="^(stripe|paypal|interac|crypto)$")
+    lead_email: Optional[str] = Field(default=None)
+
+class ManualPaymentRequest(BaseModel):
+    tier: str = Field(..., pattern="^(paid|roadmap|retainer)$")
+    domain: str = Field(..., min_length=3, max_length=200)
+    method: str = Field(..., pattern="^(paypal|interac|crypto)$")
+    lead_email: str = Field(..., min_length=5, max_length=200)
+    tx_id: Optional[str] = Field(default=None, description="Transaction ID or crypto wallet address")
 
 # ── Rate Limiting ───────────────────────────────────────────────────────────
 def check_rate_limit(client_ip: str, tier: str = "free") -> bool:
@@ -124,14 +137,11 @@ async def get_client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 # ── Trilloka Guardrail ──────────────────────────────────────────────────────
-def get_trilloka_attitude(domain: str) -> dict:
-    domain_clean = SecurityGuard.sanitize_domain(domain)
-    own_domains = {"trilloka.com", "www.trilloka.com", "trilloka"}
-    is_trilloka = domain_clean in own_domains or domain.lower().strip() in own_domains
-    if not is_trilloka:
-        return {"is_trilloka": False}
+def _frontend_guardrail() -> dict:
+    """Returned when frontend blocks before even calling API."""
     return {
         "is_trilloka": True,
+        "mode": "frontend",
         "attitude": "supreme",
         "message": "Nice try. Scanning the architect's own work? Bold move.",
         "quips": [
@@ -155,6 +165,54 @@ def get_trilloka_attitude(domain: str) -> dict:
         }
     }
 
+def _backend_guardrail(client_ip: str) -> dict:
+    """Returned when someone bypasses the frontend guardrail and hits the API directly."""
+    return {
+        "guardrail_triggered": True,
+        "target": "trilloka.com",
+        "detection_mode": "backend_bypass",
+        "severity": "pathetic",
+        "client_ip_hash": hashlib.sha256(client_ip.encode()).hexdigest()[:16],
+        "message": "Bypass attempt logged. IP fingerprinted. Dignity: not found.",
+        "response": {
+            "title": "Backend Guardrail Triggered",
+            "headline": "You didn't find a vulnerability. You found a mirror.",
+            "body": "The frontend guardrail was for UX. This one is for people who think `curl` makes them a hacker.",
+            "quips": [
+                "Your HTTP client sends more headers than your site sends visitors.",
+                "I rate this bypass attempt 0/10. Would not recommend.",
+                "You spent more time bypassing the guardrail than I spent building it.",
+                "This API endpoint is protected by sarcasm and basic string matching. You failed both.",
+                "Go ahead — try `example.com` next. At least that site won't roast you.",
+            ],
+            "metadata": {
+                "suggested_action": "Scan a site that isn't mine.",
+                "alternative_career": "Have you tried turning it off and on again?",
+                "fortress_status": "weaponized",
+                "auditor_status": "disappointed",
+                "bypass_difficulty": "trivially blocked",
+                "your_effort": "wasted",
+            }
+        },
+        "overall": {
+            "readiness": 99,
+            "evidence": 100,
+            "confidence": 100,
+            "note": "The only thing we're not ready for is your audit skills."
+        }
+    }
+
+def get_trilloka_attitude(domain: str, client_ip: str, is_frontend: bool = False) -> dict:
+    domain_clean = SecurityGuard.sanitize_domain(domain)
+    own_domains = {"trilloka.com", "www.trilloka.com", "trilloka"}
+    is_trilloka = domain_clean in own_domains or domain.lower().strip() in own_domains
+    if not is_trilloka:
+        return {"is_trilloka": False}
+
+    if is_frontend:
+        return _frontend_guardrail()
+    return _backend_guardrail(client_ip)
+
 # ── Static Pages ──────────────────────────────────────────────────────────────
 @app.get("/results", response_class=HTMLResponse)
 @app.get("/results.html", response_class=HTMLResponse)
@@ -165,6 +223,56 @@ async def serve_results():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>RRS Results</h1><p>Results page not found. Place results.html in /static/</p>")
 
+# ── Payment Options ─────────────────────────────────────────────────────────
+@app.get("/api/v1/payment-options")
+async def payment_options():
+    """Return available payment methods with instructions."""
+    return {
+        "methods": [
+            {
+                "id": "stripe",
+                "name": "Credit Card",
+                "description": "Pay securely with any major credit card.",
+                "enabled": bool(stripe.api_key),
+                "icon": "credit-card",
+                "action": "stripe_checkout",
+            },
+            {
+                "id": "paypal",
+                "name": "PayPal",
+                "description": "Send to: onlyonearpit@gmail.com",
+                "enabled": True,
+                "icon": "paypal",
+                "action": "manual",
+                "instructions": "Send payment to onlyonearpit@gmail.com via PayPal. Include your domain in the note.",
+            },
+            {
+                "id": "interac",
+                "name": "Interac e-Transfer",
+                "description": "Canadian bank transfer — zero fees.",
+                "enabled": True,
+                "icon": "bank",
+                "action": "manual",
+                "instructions": "Send e-Transfer to onlyonearpit@gmail.com. Password: trilloka2026",
+            },
+            {
+                "id": "crypto",
+                "name": "Cryptocurrency",
+                "description": "BTC, ETH, USDT accepted.",
+                "enabled": True,
+                "icon": "bitcoin",
+                "action": "manual",
+                "instructions": "Send USDT (TRC20) to your wallet. Contact onlyonearpit@gmail.com for wallet address.",
+            },
+        ],
+        "pricing": {
+            "paid": PRICING.get("paid", 149),
+            "roadmap": PRICING.get("roadmap", 299),
+            "retainer": PRICING.get("retainer", 997),
+        },
+        "contact_email": "onlyonearpit@gmail.com",
+    }
+
 # ── API Endpoints ───────────────────────────────────────────────────────────
 @app.get("/api/health")
 async def health_check():
@@ -173,12 +281,16 @@ async def health_check():
 @app.post("/api/v1/scan")
 async def scan_website(request: Request, scan_req: ScanRequest):
     client_ip = await get_client_ip(request)
+
+    # Check if this came from frontend (has custom header) or direct API hit
+    is_frontend = request.headers.get("x-client-source") == "trilloka-frontend"
+
     if not check_rate_limit(client_ip, scan_req.tier):
         raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again in a minute.")
 
     domain = SecurityGuard.sanitize_domain(scan_req.url)
-    trilloka = get_trilloka_attitude(domain)
-    if trilloka.get("is_trilloka"):
+    trilloka = get_trilloka_attitude(domain, client_ip, is_frontend=is_frontend)
+    if trilloka.get("is_trilloka") or trilloka.get("guardrail_triggered"):
         return JSONResponse(content=trilloka)
 
     try:
@@ -221,7 +333,6 @@ async def scan_website(request: Request, scan_req: ScanRequest):
         screenshot_path = data.get("screenshot_path")
         screenshot_url = None
         if screenshot_path and os.path.exists(screenshot_path):
-            # Copy to static dir for serving
             static_name = f"{domain.replace('.', '_')}_{int(datetime.now().timestamp())}.png"
             static_path = os.path.join(SCREENSHOT_STATIC, static_name)
             try:
@@ -243,11 +354,82 @@ async def scan_website(request: Request, scan_req: ScanRequest):
             except Exception:
                 pass
 
+        # Side-by-side comparison image
+        side_by_side_url = None
+        side_by_side_path = visual_twin.get("side_by_side_path")
+        if side_by_side_path and os.path.exists(side_by_side_path):
+            sb_name = f"compare_{domain.replace('.', '_')}_{int(datetime.now().timestamp())}.png"
+            sb_static = os.path.join(SCREENSHOT_STATIC, sb_name)
+            try:
+                import shutil
+                shutil.copy(side_by_side_path, sb_static)
+                side_by_side_url = f"/static/screenshots/{sb_name}"
+            except Exception:
+                pass
+
         # Business type
         business_type = data.get("business_type", {})
         if scan_req.business_type:
             business_type["detected_type"] = scan_req.business_type
             business_type["confidence"] = 100
+
+        # ── REPORT GENERATION (always runs, even for free tier) ───────────────
+        report_pdf_url = None
+        roadmap_pdf_url = None
+        try:
+            report_gen = ReportGenerator(
+                url=scan_req.url,
+                revenue_scorer=revenue_scorer,
+                content_evidence=evidence,
+                data=data,
+                top_failures=top_failures,
+            )
+
+            # Generate both report types
+            paid_report = report_gen.generate_paid()
+            roadmap_report = report_gen.generate_roadmap()
+
+            # Inject social data so PDF renderer can show it
+            paid_report["social_presence"] = social_data
+            roadmap_report["social_presence"] = social_data
+            paid_report["visual_twin"] = visual_twin
+            roadmap_report["visual_twin"] = visual_twin
+            paid_report["template_fingerprint"] = template_fp
+            roadmap_report["template_fingerprint"] = template_fp
+            paid_report["content_sameness"] = content_same
+            roadmap_report["content_sameness"] = content_same
+            paid_report["performance"] = {
+                "lighthouse": data.get("lighthouse", {}),
+                "mobile_test": data.get("mobile_test", {}),
+                "ssl_valid": data.get("ssl_valid", {}),
+                "security_headers": data.get("security_headers", {}),
+            }
+            roadmap_report["performance"] = paid_report["performance"]
+
+            ts = int(datetime.now().timestamp())
+            domain_safe = domain.replace(".", "_")
+
+            # Full Report PDF ($149 tier)
+            pdf_bytes = build_report_pdf(paid_report, scan_req.url, scan_req.lead_email, "paid")
+            report_filename = f"report_{domain_safe}_{ts}.pdf"
+            report_path = os.path.join(REPORTS_STATIC, report_filename)
+            with open(report_path, "wb") as f:
+                f.write(pdf_bytes)
+            report_pdf_url = f"/static/reports/{report_filename}"
+
+            # Roadmap PDF ($299 tier)
+            roadmap_bytes = build_report_pdf(roadmap_report, scan_req.url, scan_req.lead_email, "roadmap")
+            roadmap_filename = f"roadmap_{domain_safe}_{ts}.pdf"
+            roadmap_path = os.path.join(REPORTS_STATIC, roadmap_filename)
+            with open(roadmap_path, "wb") as f:
+                f.write(roadmap_bytes)
+            roadmap_pdf_url = f"/static/reports/{roadmap_filename}"
+
+            logger.info(f"Reports generated: {report_filename}, {roadmap_filename}")
+        except Exception as e:
+            logger.error(f"Report/PDF generation failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
 
         # Build response — EXACT same structure as before, enriched
         response = {
@@ -284,6 +466,7 @@ async def scan_website(request: Request, scan_req: ScanRequest):
                     "method": visual_twin.get("method", "unknown"),
                     "screenshot_url": screenshot_url,
                     "twin_screenshot_url": twin_screenshot_url,
+                    "side_by_side_url": side_by_side_url,
                 },
                 "presence": {
                     "score": social_data.get("presence_score", 0),
@@ -314,6 +497,10 @@ async def scan_website(request: Request, scan_req: ScanRequest):
             "hidden_failure_count": max(0, TOTAL_CHECKS - len(top_failures)),
 
             "revenue_exposure": _build_revenue_teaser(scores.get("readiness_score", 0)),
+
+            # PDF REPORTS — always generated, admin can access them
+            "report_pdf_url": report_pdf_url,
+            "roadmap_pdf_url": roadmap_pdf_url,
 
             "upgrade_cta": "Upgrade for full evidence, root cause, and fix steps." if scan_req.tier == "free" else None,
         }
@@ -379,11 +566,58 @@ async def calculate_revenue(calc: CalculatorRequest):
 
 @app.post("/api/v1/create-checkout")
 async def create_checkout(payment: PaymentRequest):
-    if not stripe.api_key:
-        raise HTTPException(status_code=500, detail="Payment system not configured")
+    """Create checkout session. Supports Stripe or returns manual payment instructions."""
     price = PRICING.get(payment.tier, 0)
     if price == 0:
         raise HTTPException(status_code=400, detail="Invalid tier")
+
+    # Manual payment methods (PayPal, Interac, Crypto)
+    if payment.method in ("paypal", "interac", "crypto"):
+        # Store the lead in Redis for manual tracking
+        if redis_available and redis_client and payment.lead_email:
+            lead_key = f"manual_payment:{payment.method}:{payment.domain}"
+            redis_client.hset(lead_key, mapping={
+                "email": payment.lead_email,
+                "tier": payment.tier,
+                "price": price,
+                "status": "pending",
+                "created": datetime.now().isoformat(),
+            })
+            redis_client.expire(lead_key, 86400 * 7)
+
+        instructions = {
+            "paypal": {
+                "send_to": "onlyonearpit@gmail.com",
+                "amount": f"${price} USD",
+                "note": f"RRS {payment.tier.title()} Report — {payment.domain}",
+                "action": "Send via PayPal Friends & Family or Goods & Services",
+            },
+            "interac": {
+                "send_to": "onlyonearpit@gmail.com",
+                "amount": f"${price} CAD",
+                "security_question": "What service is this?",
+                "security_answer": "trilloka",
+                "action": "Send Interac e-Transfer to the email above",
+            },
+            "crypto": {
+                "accepted": "USDT (TRC20), BTC, ETH",
+                "contact": "onlyonearpit@gmail.com",
+                "action": "Email for wallet address and send equivalent USD amount",
+            },
+        }
+        return {
+            "method": payment.method,
+            "status": "pending_manual",
+            "instructions": instructions[payment.method],
+            "tier": payment.tier,
+            "price": price,
+            "domain": payment.domain,
+            "next_step": "Complete payment using instructions above. Reports will be sent to your email within 24 hours.",
+        }
+
+    # Stripe checkout
+    if not stripe.api_key:
+        raise HTTPException(status_code=500, detail="Stripe not configured. Use manual payment methods.")
     try:
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
@@ -398,11 +632,53 @@ async def create_checkout(payment: PaymentRequest):
             mode="payment",
             success_url=payment.success_url,
             cancel_url=payment.cancel_url,
-            metadata={"domain": payment.domain, "tier": payment.tier},
+            metadata={"domain": payment.domain, "tier": payment.tier, "lead_email": payment.lead_email or ""},
         )
-        return {"session_id": session.id, "url": session.url}
+        return {"session_id": session.id, "url": session.url, "method": "stripe"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Payment error: {str(e)}")
+
+@app.post("/api/v1/manual-payment")
+async def record_manual_payment(payment: ManualPaymentRequest):
+    """Record a manual payment (PayPal, Interac, Crypto) for admin tracking."""
+    if redis_available and redis_client:
+        key = f"payment:{payment.method}:{payment.domain}:{int(time.time())}"
+        redis_client.hset(key, mapping={
+            "domain": payment.domain,
+            "tier": payment.tier,
+            "method": payment.method,
+            "email": payment.lead_email,
+            "tx_id": payment.tx_id or "",
+            "status": "pending_verification",
+            "created": datetime.now().isoformat(),
+        })
+        redis_client.expire(key, 86400 * 30)
+
+    logger.info(f"Manual payment recorded: {payment.method} for {payment.domain} from {payment.lead_email}")
+    return {
+        "status": "recorded",
+        "message": "Payment recorded. You will receive your report within 24 hours after verification.",
+        "admin_note": "Check your email/PayPal/Interac for the incoming payment.",
+    }
+
+@app.get("/api/v1/admin/pending-payments")
+async def pending_payments():
+    """Admin endpoint to view all pending manual payments."""
+    if not redis_available or not redis_client:
+        return {"payments": [], "note": "Redis not available"}
+
+    payments = []
+    for key in redis_client.scan_iter(match="payment:*"):
+        data = redis_client.hgetall(key)
+        if data.get("status") == "pending_verification":
+            payments.append({"id": key, **data})
+
+    for key in redis_client.scan_iter(match="manual_payment:*"):
+        data = redis_client.hgetall(key)
+        if data.get("status") == "pending":
+            payments.append({"id": key, **data})
+
+    return {"payments": payments, "count": len(payments)}
 
 @app.post("/api/v1/webhook")
 async def stripe_webhook(request: Request):
@@ -418,8 +694,11 @@ async def stripe_webhook(request: Request):
         session = event["data"]["object"]
         domain = session.get("metadata", {}).get("domain", "")
         tier = session.get("metadata", {}).get("tier", "paid")
+        lead_email = session.get("metadata", {}).get("lead_email", "")
         if redis_available and redis_client:
             redis_client.setex(f"paid:{domain}", 86400 * 30, tier)
+            if lead_email:
+                redis_client.setex(f"paid_email:{domain}", 86400 * 30, lead_email)
     return {"status": "success"}
 
 # ── Helper Functions ──────────────────────────────────────────────────────────
