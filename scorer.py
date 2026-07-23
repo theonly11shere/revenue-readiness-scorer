@@ -27,6 +27,7 @@ try:
 except Exception:
     _SSIM_AVAILABLE = False
 
+
 class TemplateFingerprinter:
     def fingerprint(self, html: str) -> Dict[str, Any]:
         if not html or len(html) < 100:
@@ -71,6 +72,7 @@ class TemplateFingerprinter:
             "matched_signatures": 0,
         }
 
+
 class ContentSamenessChecker:
     def check(self, text: str) -> Dict[str, Any]:
         if not text or len(text) < 50:
@@ -92,12 +94,15 @@ class ContentSamenessChecker:
             "sites_with_same_voice": sites_with_same_voice,
         }
 
+
 class VisualTwinMatcher:
-    """Real visual twin using screenshot SSIM comparison."""
+    """Real visual twin using screenshot SSIM comparison + side-by-side generation."""
+
     def __init__(self, fingerprint: Dict[str, Any]):
         self.fingerprint = fingerprint
         self.fp_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fingerprints.jsonl")
         self.screenshot_dir = SCREENSHOT_DIR
+        os.makedirs(self.screenshot_dir, exist_ok=True)
 
     def _compare_screenshots(self, path1: str, path2: str) -> Optional[float]:
         if not _SSIM_AVAILABLE or not os.path.exists(path1) or not os.path.exists(path2):
@@ -110,14 +115,71 @@ class VisualTwinMatcher:
         except Exception:
             return None
 
+    def _create_side_by_side(self, path1: str, path2: str, label1: str, label2: str) -> Optional[str]:
+        """Create a side-by-side comparison image of two screenshots."""
+        if not _SSIM_AVAILABLE:
+            return None
+        try:
+            img1 = Image.open(path1).convert("RGB")
+            img2 = Image.open(path2).convert("RGB")
+
+            # Resize both to same height
+            target_height = 600
+            w1, h1 = img1.size
+            w2, h2 = img2.size
+            img1 = img1.resize((int(w1 * target_height / h1), target_height))
+            img2 = img2.resize((int(w2 * target_height / h2), target_height))
+
+            # Create combined image with labels
+            from PIL import ImageDraw, ImageFont
+            label_height = 30
+            border = 4
+            total_width = img1.width + img2.width + border
+            total_height = target_height + label_height
+
+            combined = Image.new("RGB", (total_width, total_height), (20, 20, 20))
+            draw = ImageDraw.Draw(combined)
+
+            # Try to load a font, fallback to default
+            try:
+                font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 18)
+            except Exception:
+                font = ImageFont.load_default()
+
+            # Paste images
+            combined.paste(img1, (0, label_height))
+            combined.paste(img2, (img1.width + border, label_height))
+
+            # Draw labels
+            draw.text((10, 5), label1, fill=(255, 255, 255), font=font)
+            draw.text((img1.width + border + 10, 5), label2, fill=(255, 255, 255), font=font)
+
+            # Draw border between images
+            draw.rectangle([img1.width, label_height, img1.width + border, total_height], fill=(255, 255, 255))
+
+            # Save
+            domain = self.fingerprint.get("domain", "unknown")
+            out_name = f"twin_compare_{domain}_{int(datetime.now().timestamp())}.png"
+            out_path = os.path.join(self.screenshot_dir, out_name)
+            combined.save(out_path)
+            return out_path
+        except Exception as e:
+            print(f"[VisualTwinMatcher] Side-by-side creation failed: {e}")
+            return None
+
     def match(self) -> Dict[str, Any]:
         my_url = self.fingerprint.get("url", "").lower().rstrip("/")
-        my_screenshot = self.fingerprint.get("screenshot")
+        my_domain = self.fingerprint.get("domain", "").lower()
+        # Try screenshot_path first, then screenshot for backward compat
+        my_screenshot = self.fingerprint.get("screenshot_path") or self.fingerprint.get("screenshot")
+
         if not my_screenshot or not os.path.exists(my_screenshot):
             return self._fallback_match()
+
         closest = None
         closest_score = -1.0
         closest_fp = None
+
         if os.path.exists(self.fp_file):
             try:
                 with open(self.fp_file, "r", encoding="utf-8") as f:
@@ -128,9 +190,11 @@ class VisualTwinMatcher:
                         try:
                             existing = json.loads(line)
                             existing_url = existing.get("url", "").lower().rstrip("/")
-                            if existing_url == my_url or not existing_url:
+                            existing_domain = existing.get("domain", "").lower()
+                            # Skip self-match
+                            if existing_url == my_url or existing_domain == my_domain or not existing_url:
                                 continue
-                            existing_ss = existing.get("screenshot")
+                            existing_ss = existing.get("screenshot_path") or existing.get("screenshot")
                             if existing_ss and os.path.exists(existing_ss):
                                 ssim_score = self._compare_screenshots(my_screenshot, existing_ss)
                                 if ssim_score is not None and ssim_score > closest_score:
@@ -141,27 +205,43 @@ class VisualTwinMatcher:
                             continue
             except Exception:
                 pass
+
         if closest is None or closest_fp is None:
             return self._fallback_match()
+
         similarity_percent = int(closest_score * 100)
         matching_elements = self._matching_elements(self.fingerprint, closest_fp)
+
+        # Generate side-by-side comparison
+        twin_ss = closest_fp.get("screenshot_path") or closest_fp.get("screenshot")
+        side_by_side = None
+        if twin_ss and os.path.exists(twin_ss):
+            side_by_side = self._create_side_by_side(
+                my_screenshot,
+                twin_ss,
+                my_domain,
+                closest_fp.get("domain", "competitor")
+            )
+
         return {
             "similarity_percent": similarity_percent,
             "label": self._visual_label(similarity_percent),
             "closest_match_url": closest,
             "matching_elements": matching_elements,
-            "screenshot_twin": closest_fp.get("screenshot"),
+            "screenshot_twin": twin_ss,
             "ssim_score": round(closest_score, 3),
             "method": "ssim_screenshot",
+            "side_by_side_path": side_by_side,
         }
 
     def _fallback_match(self) -> Dict[str, Any]:
-        # Fallback to old color/font method if no screenshots or skimage missing
         my_vec = self._vectorize(self.fingerprint)
         my_url = self.fingerprint.get("url", "").lower().rstrip("/")
+        my_domain = self.fingerprint.get("domain", "").lower()
         closest = None
         closest_dist = float("inf")
         closest_fp = None
+
         if os.path.exists(self.fp_file):
             try:
                 with open(self.fp_file, "r", encoding="utf-8") as f:
@@ -172,7 +252,8 @@ class VisualTwinMatcher:
                         try:
                             existing = json.loads(line)
                             existing_url = existing.get("url", "").lower().rstrip("/")
-                            if existing_url == my_url or not existing_url:
+                            existing_domain = existing.get("domain", "").lower()
+                            if existing_url == my_url or existing_domain == my_domain or not existing_url:
                                 continue
                             existing_vec = self._vectorize(existing)
                             dist = self._distance(my_vec, existing_vec)
@@ -184,6 +265,7 @@ class VisualTwinMatcher:
                             continue
             except Exception:
                 pass
+
         if closest is None:
             return {
                 "similarity_percent": 0,
@@ -193,17 +275,33 @@ class VisualTwinMatcher:
                 "screenshot_twin": None,
                 "ssim_score": 0.0,
                 "method": "fallback_color_font",
+                "side_by_side_path": None,
             }
+
         similarity = max(0, min(100, int(100 - closest_dist * 33)))
         elements = self._matching_elements(self.fingerprint, closest_fp)
+        twin_ss = closest_fp.get("screenshot_path") or closest_fp.get("screenshot")
+
+        # Try to create side-by-side even in fallback mode if we have screenshots
+        side_by_side = None
+        my_ss = self.fingerprint.get("screenshot_path") or self.fingerprint.get("screenshot")
+        if my_ss and twin_ss and os.path.exists(my_ss) and os.path.exists(twin_ss):
+            side_by_side = self._create_side_by_side(
+                my_ss,
+                twin_ss,
+                my_domain,
+                closest_fp.get("domain", "competitor")
+            )
+
         return {
             "similarity_percent": similarity,
             "label": self._visual_label(similarity),
             "closest_match_url": closest,
             "matching_elements": elements,
-            "screenshot_twin": closest_fp.get("screenshot"),
+            "screenshot_twin": twin_ss,
             "ssim_score": 0.0,
             "method": "fallback_color_font",
+            "side_by_side_path": side_by_side,
         }
 
     def _hex_to_rgb(self, hex_color: str) -> Tuple[int, int, int]:
@@ -214,7 +312,8 @@ class VisualTwinMatcher:
 
     def _vectorize(self, fp: Dict[str, Any]) -> List[float]:
         vec = []
-        colors = fp.get("dominant_colors", [])
+        # Try dominant_colors first, then colors
+        colors = fp.get("dominant_colors", []) or fp.get("colors", [])
         for c in colors[:3]:
             try:
                 r, g, b = self._hex_to_rgb(c)
@@ -223,12 +322,15 @@ class VisualTwinMatcher:
                 vec.extend([0.0, 0.0, 0.0])
         while len(vec) < 9:
             vec.extend([0.0, 0.0, 0.0])
+
         fonts = fp.get("font_families", [])
         vec.append(len(fonts) / 5.0)
-        layout = fp.get("layout_ratios", {})
-        vec.append(layout.get("hero", 0) / 1.0)
+
+        # Try layout_ratios first, then layout
+        layout = fp.get("layout_ratios", {}) or fp.get("layout", {})
+        vec.append(1.0 if layout.get("has_hero") else 0.0)
         vec.append((layout.get("grid_columns", 0) or 0) / 6.0)
-        vec.append((layout.get("sections", 0) or 0) / 20.0)
+        vec.append((layout.get("sections", 0) or layout.get("section_count", 0) or 0) / 20.0)
         return vec
 
     def _distance(self, v1: List[float], v2: List[float]) -> float:
@@ -236,24 +338,29 @@ class VisualTwinMatcher:
 
     def _matching_elements(self, fp1: Dict, fp2: Dict) -> List[str]:
         elements = []
-        c1 = set(fp1.get("dominant_colors", []))
-        c2 = set(fp2.get("dominant_colors", []))
+        # Colors
+        c1 = set(fp1.get("dominant_colors", []) or fp1.get("colors", []))
+        c2 = set(fp2.get("dominant_colors", []) or fp2.get("colors", []))
         shared_colors = c1 & c2
         if shared_colors:
             elements.append(f"color {list(shared_colors)[0]}")
+
+        # Fonts
         f1 = set(fp1.get("font_families", []))
         f2 = set(fp2.get("font_families", []))
         shared_fonts = f1 & f2
         if shared_fonts:
             elements.append(f"font {list(shared_fonts)[0]}")
-        l1 = fp1.get("layout_ratios", {})
-        l2 = fp2.get("layout_ratios", {})
+
+        # Layout
+        l1 = fp1.get("layout_ratios", {}) or fp1.get("layout", {})
+        l2 = fp2.get("layout_ratios", {}) or fp2.get("layout", {})
         if l1.get("has_hero") and l2.get("has_hero"):
             elements.append("hero layout")
         if l1.get("has_grid") and l2.get("has_grid"):
             elements.append(f"{l1.get('grid_columns', 0)}-column grid")
         if l1.get("sections", 0) and l2.get("sections", 0):
-            elements.append(f"{min(l1['sections'], l2['sections'])} similar sections")
+            elements.append(f"{min(l1.get('sections', 0), l2.get('sections', 0))} similar sections")
         return elements[:5]
 
     def _visual_label(self, similarity: int) -> str:
@@ -269,9 +376,11 @@ class VisualTwinMatcher:
         except Exception:
             pass
 
+
 class CopycatIndexScorer:
     def __init__(self, html: str):
         self.html = html.lower() if html else ""
+
     def score(self) -> Dict[str, Any]:
         if not self.html:
             return {"copycat_index": 0, "template_match": "Unknown / Custom", "matched_classes": []}
@@ -301,6 +410,7 @@ class CopycatIndexScorer:
         copycat_index = min(50 + total_hits * 2, 98)
         matched_classes = [m[0] for m in matches[:3]]
         return {"copycat_index": copycat_index, "template_match": top_template, "matched_classes": matched_classes}
+
 
 class SocialSignalsFetcher:
     def __init__(self, brand: str, domain: str):
@@ -344,7 +454,16 @@ class SocialSignalsFetcher:
         total = len(mentions)
         positive = [m for m in mentions if m not in complaints]
         if own:
-            return {"mentions_found": total, "complaints_found": len(complaints), "verdict": "own", "verdict_label": "Home turf", "signals": [], "positive_examples": [], "negative_examples": [], "sources": {"reddit": len(reddit_posts), "trustpilot": len(trustpilot), "yelp": len(yelp), "google": len(google_reviews)}}
+            return {
+                "mentions_found": total,
+                "complaints_found": len(complaints),
+                "verdict": "own",
+                "verdict_label": "Home turf",
+                "signals": [],
+                "positive_examples": [],
+                "negative_examples": [],
+                "sources": {"reddit": len(reddit_posts), "trustpilot": len(trustpilot), "yelp": len(yelp), "google": len(google_reviews)},
+            }
         if total == 0:
             verdict, verdict_label = "invisible", "No public conversation found"
         elif total <= 5:
@@ -367,11 +486,19 @@ class SocialSignalsFetcher:
         results = []
         for query in queries:
             try:
-                response = self.session.get("https://www.reddit.com/search.json", params={"q": query, "limit": per_query, "sort": "new"}, timeout=5)
+                response = self.session.get(
+                    "https://www.reddit.com/search.json",
+                    params={"q": query, "limit": per_query, "sort": "new"},
+                    timeout=5,
+                )
                 if response.status_code == 200:
                     for child in response.json().get("data", {}).get("children", []):
                         d = child.get("data", {})
-                        results.append({"title": d.get("title", ""), "text": d.get("selftext", ""), "source": f"Reddit r/{d.get('subreddit', '')}"})
+                        results.append({
+                            "title": d.get("title", ""),
+                            "text": d.get("selftext", ""),
+                            "source": f"Reddit r/{d.get('subreddit', '')}",
+                        })
             except Exception:
                 continue
         return results
@@ -405,7 +532,6 @@ class SocialSignalsFetcher:
             return []
 
     def _search_google_reviews(self, domain: str) -> List[Dict[str, Any]]:
-        # Google Reviews requires JS; we do a basic knowledge panel scrape attempt
         try:
             resp = self.session.get(f"https://www.google.com/search?q={domain}+reviews", timeout=8)
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -416,6 +542,7 @@ class SocialSignalsFetcher:
             return out
         except Exception:
             return []
+
 
 class RevenueScorer:
     def __init__(self, data: Dict[str, Any]):
